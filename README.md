@@ -2,7 +2,7 @@
 
 Go + React open-source project skeleton for maintainer workflow automation.
 
-Current status: webhook signature verification + PostgreSQL event persistence + rule suggestion + alerts persistence + configurable rules + auto action execution + JWT-protected API/UI + action retry/failure recording are implemented.
+Current status: webhook signature verification + PostgreSQL event persistence + rule suggestion + alerts persistence + configurable rules + auto action execution + JWT-protected API/UI + action retry/failure recording + E2E acceptance script are implemented.
 
 ## Structure
 
@@ -74,6 +74,22 @@ Script does:
 - send signed webhook
 - query events/alerts and print summary
 
+## E2E acceptance (automated)
+
+```powershell
+# e:\VSCodeSpace\reverse\maintainer-firewall
+.\scripts\e2e.ps1
+```
+
+What it verifies automatically:
+
+- health endpoint is up
+- login returns JWT
+- protected rule create works
+- signed webhook accepted
+- events/alerts contain the new delivery_id
+- alerts include expected suggestion value
+
 ## Quick API check (manual)
 
 ```powershell
@@ -111,7 +127,6 @@ Invoke-RestMethod "http://localhost:8080/alerts?limit=20&offset=0&event_type=iss
 ## Secondary (next)
 
 - Dashboard alert summary widgets
-- E2E test for webhook -> events/alerts visibility
 - Rich filters (repository/sender/date range)
 - Export & reporting
 
