@@ -74,13 +74,15 @@ func (s *WebhookEventStore) SaveEvent(ctx context.Context, evt WebhookEvent) err
 	return nil
 }
 
-func (s *WebhookEventStore) ListEvents(ctx context.Context, limit int, offset int) ([]WebhookEventRecord, error) {
+func (s *WebhookEventStore) ListEvents(ctx context.Context, limit int, offset int, eventType string, action string) ([]WebhookEventRecord, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, delivery_id, event_type, action, repository_full_name, sender_login, received_at
 		FROM webhook_events
+		WHERE ($1 = '' OR event_type = $1)
+		  AND ($2 = '' OR action = $2)
 		ORDER BY received_at DESC
-		LIMIT $1 OFFSET $2
-	`, limit, offset)
+		LIMIT $3 OFFSET $4
+	`, strings.TrimSpace(eventType), strings.TrimSpace(action), limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("query webhook events: %w", err)
 	}
@@ -141,6 +143,14 @@ func (s *WebhookEventStore) ensureSchema(ctx context.Context) error {
 	`)
 	if err != nil {
 		return fmt.Errorf("create idx_webhook_events_event_type: %w", err)
+	}
+
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_webhook_events_action
+		ON webhook_events (action)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_webhook_events_action: %w", err)
 	}
 
 	return nil

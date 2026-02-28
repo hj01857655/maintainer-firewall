@@ -46,6 +46,7 @@ Indexes:
 
 - `idx_webhook_events_received_at (received_at DESC)`
 - `idx_webhook_events_event_type (event_type)`
+- `idx_webhook_events_action (action)`
 
 ## 5. Error Handling
 
@@ -70,19 +71,19 @@ Required for M3:
   - valid signature -> `200` and row inserted
   - invalid signature -> `401`, no row inserted
 - Events listing:
-  - `GET /events?limit=20&offset=0` returns ordered records
+- `GET /events?limit=20&offset=0&event_type=issues&action=opened` returns ordered filtered records
 
 ## 8. M4 Progress
 
 Implemented:
 
 - API `GET /events` with pagination params `limit` and `offset`
-- React event list page showing latest webhook events
+- API filtering by `event_type` and `action`
+- React event list page with filter inputs and prev/next pagination controls
 
 Next:
 
-- Add filters by `event_type` and `action`
-- Add total count and pagination controls in UI
+- Add total count and pagination controls in UI (offset controls done, total count pending)
 - Add endpoint tests for list/query validation
 
 ## 9. M5 Rule Engine v1
