@@ -59,6 +59,18 @@ type RuleRecord struct {
 	CreatedAt       time.Time `json:"created_at"`
 }
 
+type ActionExecutionFailure struct {
+	DeliveryID         string    `json:"delivery_id"`
+	EventType          string    `json:"event_type"`
+	Action             string    `json:"action"`
+	RepositoryFullName string    `json:"repository_full_name"`
+	SuggestionType     string    `json:"suggestion_type"`
+	SuggestionValue    string    `json:"suggestion_value"`
+	ErrorMessage       string    `json:"error_message"`
+	AttemptCount       int       `json:"attempt_count"`
+	OccurredAt         time.Time `json:"occurred_at,omitempty"`
+}
+
 func NewWebhookEventStore(ctx context.Context, databaseURL string) (*WebhookEventStore, error) {
 	if strings.TrimSpace(databaseURL) == "" {
 		return nil, errors.New("DATABASE_URL is not configured")
@@ -277,6 +289,19 @@ func (s *WebhookEventStore) CreateRule(ctx context.Context, rule RuleRecord) (in
 	return id, nil
 }
 
+func (s *WebhookEventStore) SaveActionExecutionFailure(ctx context.Context, item ActionExecutionFailure) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO webhook_action_failures (
+			delivery_id, event_type, action, repository_full_name,
+			suggestion_type, suggestion_value, error_message, attempt_count
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+	`, item.DeliveryID, item.EventType, item.Action, item.RepositoryFullName, item.SuggestionType, item.SuggestionValue, item.ErrorMessage, item.AttemptCount)
+	if err != nil {
+		return fmt.Errorf("insert webhook action failure: %w", err)
+	}
+	return nil
+}
+
 func (s *WebhookEventStore) ensureSchema(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS webhook_events (
@@ -401,6 +426,32 @@ func (s *WebhookEventStore) ensureSchema(ctx context.Context) error {
 	`)
 	if err != nil {
 		return fmt.Errorf("create idx_webhook_rules_active: %w", err)
+	}
+
+	_, err = s.pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS webhook_action_failures (
+			id BIGSERIAL PRIMARY KEY,
+			delivery_id TEXT NOT NULL,
+			event_type TEXT NOT NULL,
+			action TEXT NOT NULL,
+			repository_full_name TEXT NOT NULL,
+			suggestion_type TEXT NOT NULL,
+			suggestion_value TEXT NOT NULL,
+			error_message TEXT NOT NULL,
+			attempt_count INT NOT NULL,
+			occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("create webhook_action_failures table: %w", err)
+	}
+
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_webhook_action_failures_delivery
+		ON webhook_action_failures (delivery_id)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_webhook_action_failures_delivery: %w", err)
 	}
 
 	return nil

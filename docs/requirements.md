@@ -78,6 +78,11 @@ Build a self-hostable service that helps maintainers reduce noisy triage work an
   - add label
   - add comment
 
+### FR-8 Action Reliability
+- Action execution should retry on transient failures
+- If retries are exhausted, record failure details for audit/troubleshooting
+- Action failure must not block core webhook acceptance after event/alert persistence
+
 ## 7. Non-Functional Requirements
 
 - **Security**: Reject unsigned/invalid webhooks; protected APIs require bearer JWT.
@@ -100,9 +105,11 @@ For current main-flow completion, all are required:
 8. Rules API supports list/create for active rule set.
 9. Rule engine returns suggested actions for matched keywords.
 10. When `GITHUB_TOKEN` is set, suggested label/comment execution path is available.
-11. `go test ./...` and `go build ./...` pass.
-12. `npm run build` passes.
-13. README/docs include setup and run instructions.
+11. Action execution failures are retried and persisted when exhausted.
+12. Action failure does not prevent webhook success after core persistence.
+13. `go test ./...` and `go build ./...` pass.
+14. `npm run build` passes.
+15. README/docs include setup and run instructions.
 
 ## 9. Milestones
 
@@ -115,6 +122,7 @@ For current main-flow completion, all are required:
 - **M7**: Alerts persistence + alerts API/UI (done)
 - **M8**: Optional GitHub action execution (label/comment) (done)
 - **M9**: JWT login + protected API/UI routes (done)
+- **M10**: action retry + failure recording without blocking webhook core path (done)
 
 ## 10. Risks and Mitigations
 

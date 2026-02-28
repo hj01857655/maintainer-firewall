@@ -39,7 +39,11 @@
 5. Frontend pages
    - login/dashboard/events/alerts
    - protected route guard using bearer token
-6. CI and docs
+6. Reliability hardening
+   - action execution retry
+   - failure persistence (`webhook_action_failures`)
+   - webhook core persistence path remains non-blocking for action failures
+7. CI and docs
    - GitHub Actions for Go/Web build
    - README + requirements + design aligned to current flow
 
@@ -114,19 +118,17 @@ Web app:
 
 ## Next Milestones (remaining)
 
-### R1: Action execution reliability
-
-- Retry policy for GitHub action execution
-- Failure recording and traceability
-- Keep webhook persistence path non-blocking
-
-### R2: Dashboard value upgrades
+### R1: Dashboard value upgrades
 
 - Alert summary metrics
 - Rule hit trend snapshots
 - Better empty/error/loading states
 
-### R3: E2E automation
+### R2: E2E automation
+
+- Alert summary metrics
+- Rule hit trend snapshots
+- Better empty/error/loading states
 
 - End-to-end test: webhook -> events/alerts visible in UI
 
@@ -137,6 +139,7 @@ Web app:
 3. Run `npm run build` in `apps/web-react`
 4. Run one-command demo from repo root: `./scripts/demo.ps1`
 5. Verify login + protected `/events` and `/alerts`
+6. Verify retry/failure record behavior for action execution path
 
 ## Notes
 

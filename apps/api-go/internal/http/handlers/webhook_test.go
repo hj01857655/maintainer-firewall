@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -17,22 +18,37 @@ import (
 )
 
 type mockWebhookStore struct {
-	saved       []store.WebhookEvent
-	savedAlerts []store.AlertRecord
-	rules       []store.RuleRecord
+	saved            []store.WebhookEvent
+	savedAlerts      []store.AlertRecord
+	savedActionFails []store.ActionExecutionFailure
+	rules            []store.RuleRecord
 }
 
 type mockWebhookExecutor struct {
-	labels   []string
-	comments []string
+	labels          []string
+	comments        []string
+	labelFailTimes  int
+	commentFailTimes int
+	labelCalls      int
+	commentCalls    int
 }
 
 func (m *mockWebhookExecutor) AddLabel(_ context.Context, _ string, _ int, label string) error {
+	m.labelCalls++
+	if m.labelFailTimes > 0 {
+		m.labelFailTimes--
+		return errors.New("label fail")
+	}
 	m.labels = append(m.labels, label)
 	return nil
 }
 
 func (m *mockWebhookExecutor) AddComment(_ context.Context, _ string, _ int, body string) error {
+	m.commentCalls++
+	if m.commentFailTimes > 0 {
+		m.commentFailTimes--
+		return errors.New("comment fail")
+	}
 	m.comments = append(m.comments, body)
 	return nil
 }
@@ -44,6 +60,11 @@ func (m *mockWebhookStore) SaveEvent(_ context.Context, evt store.WebhookEvent) 
 
 func (m *mockWebhookStore) SaveAlert(_ context.Context, alert store.AlertRecord) error {
 	m.savedAlerts = append(m.savedAlerts, alert)
+	return nil
+}
+
+func (m *mockWebhookStore) SaveActionExecutionFailure(_ context.Context, item store.ActionExecutionFailure) error {
+	m.savedActionFails = append(m.savedActionFails, item)
 	return nil
 }
 
@@ -110,6 +131,50 @@ func TestWebhookGitHub_SignatureValid(t *testing.T) {
 	}
 	if len(exec.labels) != 1 || exec.labels[0] != "P0" {
 		t.Fatalf("expected executor label P0, got %+v", exec.labels)
+	}
+}
+
+func TestWebhookGitHub_ExecutorFailureDoesNotBlockWebhook(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	secret := "test-secret"
+	payload := map[string]any{
+		"action": "opened",
+		"repository": map[string]any{"full_name": "owner/repo"},
+		"sender": map[string]any{"login": "alice"},
+		"issue": map[string]any{"title": "urgent duplicate", "number": 12},
+	}
+	body, _ := json.Marshal(payload)
+	signature := signBody(secret, body)
+
+	mockStore := &mockWebhookStore{
+		rules: []store.RuleRecord{{EventType: "issues", Keyword: "urgent", SuggestionType: "label", SuggestionValue: "P0", Reason: "urgent rule"}},
+	}
+	h := NewWebhookHandler(secret, mockStore)
+	exec := &mockWebhookExecutor{labelFailTimes: 5}
+	h.ActionExecutor = exec
+
+	r := gin.New()
+	r.POST("/webhook/github", h.GitHub)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(body))
+	req.Header.Set("X-Hub-Signature-256", signature)
+	req.Header.Set("X-GitHub-Event", "issues")
+	req.Header.Set("X-GitHub-Delivery", "delivery-fail")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200 even when action execution failed, got %d, body=%s", w.Code, w.Body.String())
+	}
+	if len(mockStore.saved) != 1 || len(mockStore.savedAlerts) == 0 {
+		t.Fatalf("event/alert should still persist, events=%d alerts=%d", len(mockStore.saved), len(mockStore.savedAlerts))
+	}
+	if exec.labelCalls < 3 {
+		t.Fatalf("expected retry attempts >=3, got %d", exec.labelCalls)
+	}
+	if len(mockStore.savedActionFails) == 0 {
+		t.Fatalf("expected action execution failure to be persisted")
 	}
 }
 

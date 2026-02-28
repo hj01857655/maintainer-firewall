@@ -20,6 +20,7 @@ import (
 type WebhookEventSaver interface {
 	SaveEvent(ctx context.Context, evt store.WebhookEvent) error
 	SaveAlert(ctx context.Context, alert store.AlertRecord) error
+	SaveActionExecutionFailure(ctx context.Context, item store.ActionExecutionFailure) error
 	ListRules(ctx context.Context, limit int, offset int, eventType string, keyword string, activeOnly bool) ([]store.RuleRecord, int64, error)
 }
 
@@ -153,16 +154,18 @@ func (h *WebhookHandler) GitHub(c *gin.Context) {
 		}
 
 		if h.ActionExecutor != nil && issueNumber > 0 && evt.RepositoryFullName != "unknown" {
-			var execErr error
-			switch s.Type {
-			case "label":
-				execErr = h.ActionExecutor.AddLabel(ctx, evt.RepositoryFullName, issueNumber, s.Value)
-			case "comment":
-				execErr = h.ActionExecutor.AddComment(ctx, evt.RepositoryFullName, issueNumber, s.Value)
-			}
+			execErr, attempts := h.executeWithRetry(ctx, evt.RepositoryFullName, issueNumber, s)
 			if execErr != nil {
-				c.JSON(500, webhookResponse{OK: false, Message: fmt.Sprintf("failed to execute action: %v", execErr)})
-				return
+				_ = h.Store.SaveActionExecutionFailure(ctx, store.ActionExecutionFailure{
+					DeliveryID:         deliveryID,
+					EventType:          eventType,
+					Action:             action,
+					RepositoryFullName: evt.RepositoryFullName,
+					SuggestionType:     s.Type,
+					SuggestionValue:    s.Value,
+					ErrorMessage:       execErr.Error(),
+					AttemptCount:       attempts,
+				})
 			}
 		}
 	}
@@ -222,4 +225,26 @@ func extractTargetNumber(eventType string, payload map[string]any) int {
 		}
 	}
 	return 0
+}
+
+func (h *WebhookHandler) executeWithRetry(ctx context.Context, repositoryFullName string, issueNumber int, action service.SuggestedAction) (error, int) {
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		switch action.Type {
+		case "label":
+			lastErr = h.ActionExecutor.AddLabel(ctx, repositoryFullName, issueNumber, action.Value)
+		case "comment":
+			lastErr = h.ActionExecutor.AddComment(ctx, repositoryFullName, issueNumber, action.Value)
+		default:
+			return nil, attempt
+		}
+		if lastErr == nil {
+			return nil, attempt
+		}
+		if attempt < maxAttempts {
+			time.Sleep(time.Duration(attempt*100) * time.Millisecond)
+		}
+	}
+	return lastErr, maxAttempts
 }

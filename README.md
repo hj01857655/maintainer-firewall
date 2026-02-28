@@ -2,7 +2,7 @@
 
 Go + React open-source project skeleton for maintainer workflow automation.
 
-Current status: webhook signature verification + PostgreSQL event persistence + rule suggestion + alerts persistence + configurable rules + auto action execution + JWT-protected API/UI are implemented.
+Current status: webhook signature verification + PostgreSQL event persistence + rule suggestion + alerts persistence + configurable rules + auto action execution + JWT-protected API/UI + action retry/failure recording are implemented.
 
 ## Structure
 
@@ -101,8 +101,9 @@ Invoke-RestMethod "http://localhost:8080/alerts?limit=20&offset=0&event_type=iss
 - Persist rule-hit alerts
 - Configurable rules API (`GET/POST /rules`)
 - Auto execute GitHub actions (label/comment)
+- Action retry + failure recording (`webhook_action_failures`)
 - Login + protected API/UI routes (JWT)
-- Query events with pagination/filter + `total`
+
 - Query alerts with pagination/filter + `total`
 - Web pages for events/alerts
 - CI checks for API/Web build

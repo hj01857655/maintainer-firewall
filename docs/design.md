@@ -10,6 +10,7 @@ This design covers M3, M4, M5-v1 and post-MVP hardening done in this branch:
 - M6: configurable rules API (`GET/POST /rules`) and DB-backed rule matching
 - M7: optional GitHub auto actions (label/comment) execution
 - M8: JWT login and protected API routes
+- M9: action retry + failure recording without blocking webhook acceptance
 
 ## 2. Runtime Components
 
@@ -33,7 +34,9 @@ This design covers M3, M4, M5-v1 and post-MVP hardening done in this branch:
 7. Handler loads active rules from `webhook_rules` and evaluates suggestions
 8. Handler writes matched suggestions into `webhook_alerts`
 9. If configured, handler executes GitHub actions (`label`/`comment`) via GitHub API
-10. React console calls `GET /events` / `GET /alerts` / `GET /rules`
+10. Action execution uses retry policy and records failures when retries are exhausted
+11. Webhook still returns success after core persistence path completes
+12. React console calls `GET /events` / `GET /alerts` / `GET /rules`
 
 ## 4. Data Model
 
@@ -121,6 +124,10 @@ Implemented:
 - Optional GitHub auto-action execution:
   - `label` action
   - `comment` action
+- Action reliability hardening:
+  - retry attempts for action execution
+  - failed executions persisted to `webhook_action_failures`
+  - webhook accept path remains non-blocking for action failures
 - JWT auth for console APIs:
-  - `POST /auth/login`
+
   - middleware-protected `/events`, `/alerts`, `/rules`
