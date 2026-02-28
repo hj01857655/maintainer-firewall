@@ -7,6 +7,7 @@ import (
 
 	"maintainer-firewall/api-go/internal/config"
 	"maintainer-firewall/api-go/internal/http/handlers"
+	"maintainer-firewall/api-go/internal/service"
 	"maintainer-firewall/api-go/internal/store"
 
 	"github.com/gin-gonic/gin"
@@ -22,6 +23,7 @@ func main() {
 	defer eventStore.Close()
 
 	webhookHandler := handlers.NewWebhookHandler(cfg.GitHubWebhookSecret, eventStore)
+	webhookHandler.ActionExecutor = service.NewGitHubActionExecutor(cfg.GitHubToken)
 	eventsHandler := handlers.NewEventsHandler(eventStore)
 	alertsHandler := handlers.NewAlertsHandler(eventStore)
 	rulesHandler := handlers.NewRulesHandler(eventStore)

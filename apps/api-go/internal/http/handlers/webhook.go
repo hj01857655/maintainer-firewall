@@ -23,10 +23,16 @@ type WebhookEventSaver interface {
 	ListRules(ctx context.Context, limit int, offset int, eventType string, keyword string, activeOnly bool) ([]store.RuleRecord, int64, error)
 }
 
+type WebhookActionExecutor interface {
+	AddLabel(ctx context.Context, repositoryFullName string, number int, label string) error
+	AddComment(ctx context.Context, repositoryFullName string, number int, body string) error
+}
+
 type WebhookHandler struct {
-	Secret     string
-	Store      WebhookEventSaver
-	RuleEngine *service.RuleEngine
+	Secret         string
+	Store          WebhookEventSaver
+	RuleEngine     *service.RuleEngine
+	ActionExecutor WebhookActionExecutor
 }
 
 type webhookResponse struct {
@@ -128,6 +134,7 @@ func (h *WebhookHandler) GitHub(c *gin.Context) {
 		}
 	}
 
+	issueNumber := extractTargetNumber(eventType, payload)
 	for _, s := range suggestions {
 		alert := store.AlertRecord{
 			DeliveryID:         deliveryID,
@@ -143,6 +150,20 @@ func (h *WebhookHandler) GitHub(c *gin.Context) {
 		if err := h.Store.SaveAlert(ctx, alert); err != nil {
 			c.JSON(500, webhookResponse{OK: false, Message: fmt.Sprintf("failed to persist alert: %v", err)})
 			return
+		}
+
+		if h.ActionExecutor != nil && issueNumber > 0 && evt.RepositoryFullName != "unknown" {
+			var execErr error
+			switch s.Type {
+			case "label":
+				execErr = h.ActionExecutor.AddLabel(ctx, evt.RepositoryFullName, issueNumber, s.Value)
+			case "comment":
+				execErr = h.ActionExecutor.AddComment(ctx, evt.RepositoryFullName, issueNumber, s.Value)
+			}
+			if execErr != nil {
+				c.JSON(500, webhookResponse{OK: false, Message: fmt.Sprintf("failed to execute action: %v", execErr)})
+				return
+			}
 		}
 	}
 
@@ -183,4 +204,22 @@ func verifyGitHubSignature(signatureHeader string, body []byte, secret string) b
 	mac.Write(body)
 	expected := "sha256=" + hex.EncodeToString(mac.Sum(nil))
 	return hmac.Equal([]byte(expected), []byte(signatureHeader))
+}
+
+func extractTargetNumber(eventType string, payload map[string]any) int {
+	if eventType == "issues" {
+		if issue, ok := payload["issue"].(map[string]any); ok {
+			if n, ok := issue["number"].(float64); ok {
+				return int(n)
+			}
+		}
+	}
+	if eventType == "pull_request" {
+		if pr, ok := payload["pull_request"].(map[string]any); ok {
+			if n, ok := pr["number"].(float64); ok {
+				return int(n)
+			}
+		}
+	}
+	return 0
 }

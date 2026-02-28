@@ -22,6 +22,21 @@ type mockWebhookStore struct {
 	rules       []store.RuleRecord
 }
 
+type mockWebhookExecutor struct {
+	labels   []string
+	comments []string
+}
+
+func (m *mockWebhookExecutor) AddLabel(_ context.Context, _ string, _ int, label string) error {
+	m.labels = append(m.labels, label)
+	return nil
+}
+
+func (m *mockWebhookExecutor) AddComment(_ context.Context, _ string, _ int, body string) error {
+	m.comments = append(m.comments, body)
+	return nil
+}
+
 func (m *mockWebhookStore) SaveEvent(_ context.Context, evt store.WebhookEvent) error {
 	m.saved = append(m.saved, evt)
 	return nil
@@ -44,7 +59,7 @@ func TestWebhookGitHub_SignatureValid(t *testing.T) {
 		"action": "opened",
 		"repository": map[string]any{"full_name": "owner/repo"},
 		"sender": map[string]any{"login": "alice"},
-		"issue": map[string]any{"title": "urgent duplicate"},
+		"issue": map[string]any{"title": "urgent duplicate", "number": 12},
 	}
 	body, _ := json.Marshal(payload)
 	signature := signBody(secret, body)
@@ -55,6 +70,8 @@ func TestWebhookGitHub_SignatureValid(t *testing.T) {
 		},
 	}
 	h := NewWebhookHandler(secret, mockStore)
+	exec := &mockWebhookExecutor{}
+	h.ActionExecutor = exec
 
 	r := gin.New()
 	r.POST("/webhook/github", h.GitHub)
@@ -90,6 +107,9 @@ func TestWebhookGitHub_SignatureValid(t *testing.T) {
 	}
 	if mockStore.savedAlerts[0].SuggestionValue != "P0" {
 		t.Fatalf("expected rule suggestion value P0, got %s", mockStore.savedAlerts[0].SuggestionValue)
+	}
+	if len(exec.labels) != 1 || exec.labels[0] != "P0" {
+		t.Fatalf("expected executor label P0, got %+v", exec.labels)
 	}
 }
 
