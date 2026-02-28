@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { authHeaders } from '../auth'
+import { apiFetch } from '../api'
 
 type AuditItem = {
   id: number
@@ -35,14 +35,23 @@ export function AuditLogsPage() {
   const [total, setTotal] = useState(0)
   const [actor, setActor] = useState('')
   const [action, setAction] = useState('')
+  const [sinceWindow, setSinceWindow] = useState<'all' | '24h' | '7d' | '30d'>('all')
   const limit = 20
 
   useEffect(() => {
     const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
     if (actor) params.set('actor', actor)
     if (action) params.set('action', action)
+    if (sinceWindow !== 'all') {
+      const now = new Date()
+      const since = new Date(now)
+      if (sinceWindow === '24h') since.setHours(now.getHours() - 24)
+      if (sinceWindow === '7d') since.setDate(now.getDate() - 7)
+      if (sinceWindow === '30d') since.setDate(now.getDate() - 30)
+      params.set('since', since.toISOString())
+    }
 
-    fetch(`/api/audit-logs?${params.toString()}`, { headers: authHeaders() })
+    apiFetch(`/api/audit-logs?${params.toString()}`)
       .then(async (r) => {
         if (!r.ok) throw new Error(await r.text())
         return r.json() as Promise<AuditResponse>
@@ -53,20 +62,20 @@ export function AuditLogsPage() {
         setTotal(data.total)
       })
       .catch((e: Error) => setError(e.message))
-  }, [offset, actor, action])
+  }, [offset, actor, action, sinceWindow])
 
   const currentPage = useMemo(() => Math.floor(offset / limit) + 1, [offset])
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / limit)), [total])
 
   return (
     <section className="space-y-4">
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
+      <div className="rounded-2xl border border-slate-200 bg-white/95 p-5 shadow-sm md:p-6">
         <h1 className="m-0 text-2xl font-semibold tracking-tight text-slate-900">{t('audit.title')}</h1>
         <p className="mt-2 text-sm leading-relaxed text-slate-600">{t('audit.subtitle')}</p>
 
         <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
           <label className="block text-sm font-medium text-slate-700">
-            <span>Actor</span>
+            <span>{t('audit.filters.actor')}</span>
             <input
               className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3 text-base text-slate-900 outline-none transition-colors duration-200 placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
               value={actor}
@@ -74,49 +83,70 @@ export function AuditLogsPage() {
                 setOffset(0)
                 setActor(e.target.value)
               }}
-              placeholder="admin"
+              placeholder={t('audit.filters.actorPlaceholder')}
             />
           </label>
           <label className="block text-sm font-medium text-slate-700">
-            <span>Action</span>
-            <input
-              className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3 text-base text-slate-900 outline-none transition-colors duration-200 placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            <span>{t('audit.filters.action')}</span>
+            <select
+              className="mt-2 h-11 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 outline-none transition-colors duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
               value={action}
               onChange={(e) => {
                 setOffset(0)
                 setAction(e.target.value)
               }}
-              placeholder="rule.create"
-            />
+            >
+              <option value="">{t('audit.filters.all')}</option>
+              <option value="rule.create">rule.create</option>
+              <option value="rule.update_active">rule.update_active</option>
+              <option value="failure.retry.success">failure.retry.success</option>
+              <option value="failure.retry.failed">failure.retry.failed</option>
+            </select>
+          </label>
+          <label className="block text-sm font-medium text-slate-700">
+            <span>{t('audit.filters.since')}</span>
+            <select
+              className="mt-2 h-11 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 outline-none transition-colors duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              value={sinceWindow}
+              onChange={(e) => {
+                setOffset(0)
+                setSinceWindow(e.target.value as 'all' | '24h' | '7d' | '30d')
+              }}
+            >
+              <option value="all">{t('audit.filters.all')}</option>
+              <option value="24h">{t('audit.filters.last24h')}</option>
+              <option value="7d">{t('audit.filters.last7d')}</option>
+              <option value="30d">{t('audit.filters.last30d')}</option>
+            </select>
           </label>
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white/95 shadow-sm">
         <table className="min-w-[1080px] w-full text-sm">
           <thead className="bg-slate-100 text-slate-700">
             <tr>
-              <th className="px-3 py-2 text-left">ID</th>
-              <th className="px-3 py-2 text-left">Actor</th>
-              <th className="px-3 py-2 text-left">Action</th>
-              <th className="px-3 py-2 text-left">Target</th>
-              <th className="px-3 py-2 text-left">Target ID</th>
-              <th className="px-3 py-2 text-left">Payload</th>
-              <th className="px-3 py-2 text-left">Created At</th>
+              <th className="px-3 py-2 text-left">{t('audit.table.id')}</th>
+              <th className="px-3 py-2 text-left">{t('audit.table.actor')}</th>
+              <th className="px-3 py-2 text-left">{t('audit.table.action')}</th>
+              <th className="px-3 py-2 text-left">{t('audit.table.target')}</th>
+              <th className="px-3 py-2 text-left">{t('audit.table.targetId')}</th>
+              <th className="px-3 py-2 text-left">{t('audit.table.payload')}</th>
+              <th className="px-3 py-2 text-left">{t('audit.table.createdAt')}</th>
             </tr>
           </thead>
           <tbody>
             {items.map((item) => (
-              <tr key={item.id} className="border-t border-slate-200">
-                <td className="px-3 py-2">{item.id}</td>
-                <td className="px-3 py-2">{item.actor}</td>
-                <td className="px-3 py-2">{item.action}</td>
-                <td className="px-3 py-2">{item.target}</td>
-                <td className="px-3 py-2">{item.target_id}</td>
-                <td className="px-3 py-2 max-w-[420px] break-words">
+              <tr key={item.id} className="border-t border-slate-200 hover:bg-slate-50/70">
+                <td className="px-3 py-2 text-slate-900">{item.id}</td>
+                <td className="px-3 py-2 text-slate-900">{item.actor}</td>
+                <td className="px-3 py-2 text-slate-900">{item.action}</td>
+                <td className="px-3 py-2 text-slate-900">{item.target}</td>
+                <td className="px-3 py-2 text-slate-900">{item.target_id}</td>
+                <td className="px-3 py-2 max-w-[420px] break-words text-slate-900">
                   <details>
-                    <summary className="cursor-pointer text-blue-600">View JSON</summary>
-                    <pre className="mt-2 overflow-x-auto rounded-lg bg-slate-900 p-2 text-xs text-slate-100">
+                    <summary className="cursor-pointer text-blue-600">{t('common.viewJson')}</summary>
+                    <pre className="mt-2 overflow-x-auto rounded-lg bg-slate-900 p-2 text-xs leading-relaxed text-slate-100">
                       {formatJSON(item.payload)}
                     </pre>
                   </details>

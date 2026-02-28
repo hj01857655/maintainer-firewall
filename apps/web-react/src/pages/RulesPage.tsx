@@ -140,12 +140,12 @@ export function RulesPage() {
 
   return (
     <section className="space-y-4">
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
+      <div className="rounded-2xl border border-slate-200 bg-white/95 p-5 shadow-sm md:p-6">
         <h1 className="m-0 text-2xl font-semibold tracking-tight text-slate-900">{t('rules.title')}</h1>
         <p className="mt-2 text-sm leading-relaxed text-slate-600">{t('rules.subtitle')}</p>
       </div>
 
-      <form onSubmit={onCreateRule} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
+      <form onSubmit={onCreateRule} className="rounded-2xl border border-slate-200 bg-white/95 p-5 shadow-sm md:p-6">
         <h2 className="m-0 text-lg font-semibold text-slate-900">{t('rules.create.title')}</h2>
         {(searchParams.get('keyword') || searchParams.get('event_type')) ? (
           <p className="mt-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700">
@@ -288,7 +288,7 @@ export function RulesPage() {
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white/95 shadow-sm">
         <table className="min-w-[1120px] w-full text-sm">
           <thead className="bg-slate-100 text-slate-700">
             <tr>
@@ -305,7 +305,7 @@ export function RulesPage() {
           </thead>
           <tbody>
             {rules.map((item) => (
-              <tr key={item.id} className="border-t border-slate-200">
+              <tr key={item.id} className="border-t border-slate-200 hover:bg-slate-50/70">
                 <td className="px-3 py-2">{item.id}</td>
                 <td className="px-3 py-2">{item.event_type}</td>
                 <td className="px-3 py-2">{item.keyword}</td>

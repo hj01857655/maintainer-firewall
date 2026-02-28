@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { authHeaders } from '../auth'
+import { apiFetch } from '../api'
 
 type Health = {
   status: string
@@ -32,13 +33,13 @@ export function DashboardPage() {
 
   useEffect(() => {
     Promise.all([
-      fetch('/api/health', { headers: authHeaders() }).then((r) => r.json() as Promise<Health>),
-      fetch(`/api/metrics/overview?window=${windowValue}`, { headers: authHeaders() }).then(async (r) => {
-        if (!r.ok) throw new Error(await r.text())
+      apiFetch('/api/health').then((r) => r.json() as Promise<Health>),
+      apiFetch(`/api/metrics/overview?window=${windowValue}`).then(async (r) => {
+
         return r.json() as Promise<{ ok: boolean; overview: MetricsOverview }>
       }),
-      fetch(`/api/metrics/timeseries?window=${windowValue}&interval_minutes=60`, { headers: authHeaders() }).then(async (r) => {
-        if (!r.ok) throw new Error(await r.text())
+      apiFetch(`/api/metrics/timeseries?window=${windowValue}&interval_minutes=60`).then(async (r) => {
+
         return r.json() as Promise<{ ok: boolean; items: MetricsPoint[] }>
       }),
     ])
@@ -72,17 +73,17 @@ export function DashboardPage() {
 
   return (
     <section className="space-y-4">
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
+      <div className="rounded-2xl border border-slate-200 bg-white/95 p-5 shadow-sm md:p-6">
         <h1 className="m-0 text-2xl font-semibold tracking-tight text-slate-900">{t('dashboard.title')}</h1>
         <p className="mt-2 text-sm leading-relaxed text-slate-600">{t('dashboard.subtitle')}</p>
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
-        <MetricCard label={t('dashboard.cards.events24h')} value={overview?.events_24h ?? 0} />
-        <MetricCard label={t('dashboard.cards.alerts24h')} value={overview?.alerts_24h ?? 0} />
-        <MetricCard label={t('dashboard.cards.failures24h')} value={overview?.failures_24h ?? 0} />
-        <MetricCard label={t('dashboard.cards.successRate24h')} value={`${(overview?.success_rate_24h ?? 0).toFixed(2)}%`} />
-        <MetricCard label={t('dashboard.cards.p95Latency24h')} value={`${Math.round(overview?.p95_latency_ms_24h ?? 0)}`} />
+        <MetricCard label={t('dashboard.cards.events24h')} value={overview?.events_24h ?? 0} to="/events" />
+        <MetricCard label={t('dashboard.cards.alerts24h')} value={overview?.alerts_24h ?? 0} to="/alerts" />
+        <MetricCard label={t('dashboard.cards.failures24h')} value={overview?.failures_24h ?? 0} to="/failures" />
+        <MetricCard label={t('dashboard.cards.successRate24h')} value={`${(overview?.success_rate_24h ?? 0).toFixed(2)}%`} to="/audit" />
+        <MetricCard label={t('dashboard.cards.p95Latency24h')} value={`${Math.round(overview?.p95_latency_ms_24h ?? 0)}`} to="/audit" />
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
@@ -105,13 +106,21 @@ export function DashboardPage() {
           </div>
         </div>
         <div className="mt-3 h-56 w-full rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full">
-            <polyline points={eventsPath} fill="none" stroke="#3B82F6" strokeWidth="1.8" />
-            <polyline points={alertsPath} fill="none" stroke="#F59E0B" strokeWidth="1.8" />
-            <polyline points={failuresPath} fill="none" stroke="#EF4444" strokeWidth="1.8" />
-          </svg>
+          {series.length === 0 ? (
+            <div className="grid h-full place-items-center text-sm text-slate-500">{t('dashboard.noTrendData')}</div>
+          ) : (
+            <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full">
+              <polyline points={eventsPath} fill="none" stroke="#3B82F6" strokeWidth="1.8" />
+              <polyline points={alertsPath} fill="none" stroke="#F59E0B" strokeWidth="1.8" />
+              <polyline points={failuresPath} fill="none" stroke="#EF4444" strokeWidth="1.8" />
+            </svg>
+          )}
         </div>
-        <p className="mt-2 text-xs text-slate-500">blue=events, amber=alerts, red=failures</p>
+        <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-500">
+          <span className="inline-flex items-center gap-1"><i className="inline-block h-2 w-2 rounded-full bg-blue-500" />{t('dashboard.legend.events')}</span>
+          <span className="inline-flex items-center gap-1"><i className="inline-block h-2 w-2 rounded-full bg-amber-500" />{t('dashboard.legend.alerts')}</span>
+          <span className="inline-flex items-center gap-1"><i className="inline-block h-2 w-2 rounded-full bg-red-500" />{t('dashboard.legend.failures')}</span>
+        </div>
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
@@ -130,11 +139,19 @@ export function DashboardPage() {
   )
 }
 
-function MetricCard({ label, value }: { label: string; value: number | string }) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+function MetricCard({ label, value, to }: { label: string; value: number | string; to?: string }) {
+  const body = (
+    <div className="rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-sm transition-colors duration-200 hover:border-blue-300 hover:bg-blue-50/40">
       <p className="text-xs text-slate-500">{label}</p>
       <p className="mt-1 text-2xl font-semibold text-slate-900">{value}</p>
     </div>
+  )
+
+  if (!to) return body
+
+  return (
+    <Link to={to} className="cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded-2xl">
+      {body}
+    </Link>
   )
 }
