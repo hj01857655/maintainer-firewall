@@ -17,6 +17,7 @@ import (
 
 type ActionFailureRetryStore interface {
 	GetActionExecutionFailureByID(ctx context.Context, id int64) (store.ActionExecutionFailureRecord, error)
+	UpdateActionFailureRetryResult(ctx context.Context, id int64, success bool, message string) error
 	GetWebhookEventPayloadByDeliveryID(ctx context.Context, deliveryID string) (json.RawMessage, error)
 	SaveAuditLog(ctx context.Context, item store.AuditLogRecord) error
 }
@@ -64,6 +65,7 @@ func (h *ActionFailureRetryHandler) Retry(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "message": fmt.Sprintf("load related event failed: %v", err)})
 		return
 	}
+
 	var payload map[string]any
 	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "message": fmt.Sprintf("parse related event failed: %v", err)})
@@ -92,6 +94,7 @@ func (h *ActionFailureRetryHandler) Retry(c *gin.Context) {
 	}
 
 	if err != nil {
+		_ = h.Store.UpdateActionFailureRetryResult(ctx, failure.ID, false, err.Error())
 		_ = h.Store.SaveAuditLog(ctx, store.AuditLogRecord{
 			Actor:    actor,
 			Action:   "failure.retry.failed",
@@ -99,10 +102,17 @@ func (h *ActionFailureRetryHandler) Retry(c *gin.Context) {
 			TargetID: fmt.Sprintf("%d", failure.ID),
 			Payload:  fmt.Sprintf(`{"delivery_id":"%s","error":"%s"}`, failure.DeliveryID, strings.ReplaceAll(err.Error(), `"`, `'`)),
 		})
-		c.JSON(http.StatusBadGateway, gin.H{"ok": false, "message": fmt.Sprintf("retry failed: %v", err)})
+
+		status := http.StatusBadGateway
+		errMsg := strings.ToLower(err.Error())
+		if strings.Contains(errMsg, "not configured") || strings.Contains(errMsg, "invalid ") || strings.Contains(errMsg, "empty ") || strings.Contains(errMsg, "unsupported") {
+			status = http.StatusBadRequest
+		}
+		c.JSON(status, gin.H{"ok": false, "message": fmt.Sprintf("retry failed: %v", err)})
 		return
 	}
 
+	_ = h.Store.UpdateActionFailureRetryResult(ctx, failure.ID, true, "retry succeeded")
 	_ = h.Store.SaveAuditLog(ctx, store.AuditLogRecord{
 		Actor:    actor,
 		Action:   "failure.retry.success",

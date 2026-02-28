@@ -30,10 +30,18 @@ func main() {
 	eventsHandler := handlers.NewEventsHandler(eventStore)
 	alertsHandler := handlers.NewAlertsHandler(eventStore)
 	rulesHandler := handlers.NewRulesHandler(eventStore)
-	observabilityHandler := handlers.NewObservabilityHandler(eventStore)
+	observabilityHandler := handlers.NewObservabilityHandler(eventStore, handlers.RuntimeConfigStatus{
+		GitHubTokenConfigured:         cfg.GitHubToken != "",
+		GitHubWebhookSecretConfigured: cfg.GitHubWebhookSecret != "",
+		DatabaseURLConfigured:         cfg.DatabaseURL != "",
+		JWTSecretConfigured:           cfg.JWTSecret != "",
+		AdminUsernameConfigured:       cfg.AdminUsername != "",
+		AdminPasswordConfigured:       cfg.AdminPassword != "",
+	})
 	authHandler := handlers.NewAuthHandler(cfg.AdminUsername, cfg.AdminPassword, cfg.JWTSecret, 24*time.Hour)
 
 	r := gin.Default()
+
 	r.GET("/health", handlers.Health)
 	r.POST("/auth/login", authHandler.Login)
 	r.POST("/webhook/github", webhookHandler.GitHub)
@@ -45,8 +53,14 @@ func main() {
 	api.GET("/rules", rulesHandler.List)
 	api.POST("/rules", rulesHandler.Create)
 	api.PATCH("/rules/:id/active", rulesHandler.UpdateActive)
+
+	api.GET("/config-status", observabilityHandler.ConfigStatus)
+	api.GET("/config-view", observabilityHandler.ConfigView)
+	api.POST("/config-update", observabilityHandler.ConfigUpdate)
+
 	api.GET("/metrics/overview", observabilityHandler.MetricsOverview)
 	api.GET("/metrics/timeseries", observabilityHandler.MetricsTimeSeries)
+
 	api.GET("/action-failures", observabilityHandler.ActionFailures)
 	api.GET("/audit-logs", observabilityHandler.AuditLogs)
 	api.POST("/action-failures/:id/retry", actionFailureRetryHandler.Retry)

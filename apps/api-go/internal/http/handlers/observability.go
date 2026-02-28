@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -13,18 +16,116 @@ import (
 )
 
 type ObservabilityStore interface {
-	ListActionExecutionFailures(ctx context.Context, limit int, offset int) ([]store.ActionExecutionFailureRecord, int64, error)
-	ListAuditLogs(ctx context.Context, limit int, offset int, actor string, action string) ([]store.AuditLogRecord, int64, error)
+	ListActionExecutionFailures(ctx context.Context, limit int, offset int, includeResolved bool) ([]store.ActionExecutionFailureRecord, int64, error)
+	ListAuditLogs(ctx context.Context, limit int, offset int, actor string, action string, since *time.Time) ([]store.AuditLogRecord, int64, error)
 	GetMetricsOverview(ctx context.Context, since time.Time) (store.MetricsOverview, error)
 	GetMetricsTimeSeries(ctx context.Context, since time.Time, intervalMinutes int) ([]store.MetricsTimePoint, error)
 }
 
-type ObservabilityHandler struct {
-	Store ObservabilityStore
+type RuntimeConfigStatus struct {
+	GitHubTokenConfigured         bool
+	GitHubWebhookSecretConfigured bool
+	DatabaseURLConfigured         bool
+	JWTSecretConfigured           bool
+	AdminUsernameConfigured       bool
+	AdminPasswordConfigured       bool
 }
 
-func NewObservabilityHandler(s ObservabilityStore) *ObservabilityHandler {
-	return &ObservabilityHandler{Store: s}
+type ObservabilityHandler struct {
+	Store         ObservabilityStore
+	RuntimeConfig RuntimeConfigStatus
+}
+
+func NewObservabilityHandler(s ObservabilityStore, cfg RuntimeConfigStatus) *ObservabilityHandler {
+	return &ObservabilityHandler{Store: s, RuntimeConfig: cfg}
+}
+
+func (h *ObservabilityHandler) ConfigStatus(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"ok":                               true,
+		"github_token_configured":          h.RuntimeConfig.GitHubTokenConfigured,
+		"github_webhook_secret_configured": h.RuntimeConfig.GitHubWebhookSecretConfigured,
+		"database_url_configured":          h.RuntimeConfig.DatabaseURLConfigured,
+		"jwt_secret_configured":            h.RuntimeConfig.JWTSecretConfigured,
+		"admin_username_configured":        h.RuntimeConfig.AdminUsernameConfigured,
+		"admin_password_configured":        h.RuntimeConfig.AdminPasswordConfigured,
+	})
+}
+
+type ConfigUpdateRequest struct {
+	DatabaseURL         *string `json:"database_url"`
+	AdminUsername       *string `json:"admin_username"`
+	AdminPassword       *string `json:"admin_password"`
+	JWTSecret           *string `json:"jwt_secret"`
+	GitHubWebhookSecret *string `json:"github_webhook_secret"`
+	GitHubToken         *string `json:"github_token"`
+}
+
+func (h *ObservabilityHandler) ConfigView(c *gin.Context) {
+	vals, err := readEnvFile()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "message": fmt.Sprintf("read .env failed: %v", err)})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"ok":                    true,
+		"database_url":          vals["DATABASE_URL"],
+		"admin_username":        vals["ADMIN_USERNAME"],
+		"admin_password_masked": maskSecret(vals["ADMIN_PASSWORD"]),
+		"jwt_secret_masked":     maskSecret(vals["JWT_SECRET"]),
+		"github_webhook_secret_masked": maskSecret(vals["GITHUB_WEBHOOK_SECRET"]),
+		"github_token_masked":          maskSecret(vals["GITHUB_TOKEN"]),
+	})
+}
+
+func (h *ObservabilityHandler) ConfigUpdate(c *gin.Context) {
+	var req ConfigUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "message": fmt.Sprintf("invalid body: %v", err)})
+		return
+	}
+	vals, err := readEnvFile()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "message": fmt.Sprintf("read .env failed: %v", err)})
+		return
+	}
+	if req.DatabaseURL != nil {
+		vals["DATABASE_URL"] = strings.TrimSpace(*req.DatabaseURL)
+		_ = os.Setenv("DATABASE_URL", vals["DATABASE_URL"])
+	}
+	if req.AdminUsername != nil {
+		vals["ADMIN_USERNAME"] = strings.TrimSpace(*req.AdminUsername)
+		_ = os.Setenv("ADMIN_USERNAME", vals["ADMIN_USERNAME"])
+	}
+	if req.AdminPassword != nil {
+		vals["ADMIN_PASSWORD"] = strings.TrimSpace(*req.AdminPassword)
+		_ = os.Setenv("ADMIN_PASSWORD", vals["ADMIN_PASSWORD"])
+	}
+	if req.JWTSecret != nil {
+		vals["JWT_SECRET"] = strings.TrimSpace(*req.JWTSecret)
+		_ = os.Setenv("JWT_SECRET", vals["JWT_SECRET"])
+	}
+	if req.GitHubWebhookSecret != nil {
+		vals["GITHUB_WEBHOOK_SECRET"] = strings.TrimSpace(*req.GitHubWebhookSecret)
+		_ = os.Setenv("GITHUB_WEBHOOK_SECRET", vals["GITHUB_WEBHOOK_SECRET"])
+	}
+	if req.GitHubToken != nil {
+		vals["GITHUB_TOKEN"] = strings.TrimSpace(*req.GitHubToken)
+		_ = os.Setenv("GITHUB_TOKEN", vals["GITHUB_TOKEN"])
+	}
+	if err := writeEnvFile(vals); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "message": fmt.Sprintf("write .env failed: %v", err)})
+		return
+	}
+	h.RuntimeConfig = RuntimeConfigStatus{
+		GitHubTokenConfigured:         strings.TrimSpace(vals["GITHUB_TOKEN"]) != "",
+		GitHubWebhookSecretConfigured: strings.TrimSpace(vals["GITHUB_WEBHOOK_SECRET"]) != "",
+		DatabaseURLConfigured:         strings.TrimSpace(vals["DATABASE_URL"]) != "",
+		JWTSecretConfigured:           strings.TrimSpace(vals["JWT_SECRET"]) != "",
+		AdminUsernameConfigured:       strings.TrimSpace(vals["ADMIN_USERNAME"]) != "",
+		AdminPasswordConfigured:       strings.TrimSpace(vals["ADMIN_PASSWORD"]) != "",
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "message": "config saved", "restart_required": true})
 }
 
 func (h *ObservabilityHandler) MetricsOverview(c *gin.Context) {
@@ -114,18 +215,20 @@ func (h *ObservabilityHandler) ActionFailures(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
 	defer cancel()
 
-	items, total, err := h.Store.ListActionExecutionFailures(ctx, limit, offset)
+	includeResolved := strings.EqualFold(c.DefaultQuery("include_resolved", "false"), "true")
+	items, total, err := h.Store.ListActionExecutionFailures(ctx, limit, offset, includeResolved)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "message": fmt.Sprintf("list action failures failed: %v", err)})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"ok":     true,
-		"items":  items,
-		"limit":  limit,
-		"offset": offset,
-		"total":  total,
+		"ok":               true,
+		"items":            items,
+		"limit":            limit,
+		"offset":           offset,
+		"total":            total,
+		"include_resolved": includeResolved,
 	})
 }
 
@@ -152,7 +255,19 @@ func (h *ObservabilityHandler) AuditLogs(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
 	defer cancel()
 
-	items, total, err := h.Store.ListAuditLogs(ctx, limit, offset, actor, action)
+	sinceStr := strings.TrimSpace(c.Query("since"))
+	var since *time.Time
+	if sinceStr != "" {
+		parsed, err := time.Parse(time.RFC3339, sinceStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"ok": false, "message": "since must be RFC3339"})
+			return
+		}
+		t := parsed.UTC()
+		since = &t
+	}
+
+	items, total, err := h.Store.ListAuditLogs(ctx, limit, offset, actor, action, since)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "message": fmt.Sprintf("list audit logs failed: %v", err)})
 		return
@@ -166,7 +281,62 @@ func (h *ObservabilityHandler) AuditLogs(c *gin.Context) {
 		"total":  total,
 		"actor":  actor,
 		"action": action,
+		"since":  since,
 	})
+}
+
+func readEnvFile() (map[string]string, error) {
+	path := filepath.Clean(".env")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]string{}, nil
+		}
+		return nil, err
+	}
+	out := map[string]string{}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		out[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+	}
+	return out, nil
+}
+
+func writeEnvFile(vals map[string]string) error {
+	ordered := []string{"DATABASE_URL", "PORT", "ADMIN_USERNAME", "ADMIN_PASSWORD", "JWT_SECRET", "GITHUB_WEBHOOK_SECRET", "GITHUB_TOKEN"}
+	lines := make([]string, 0, len(vals))
+	seen := map[string]bool{}
+	for _, k := range ordered {
+		if v, ok := vals[k]; ok {
+			lines = append(lines, fmt.Sprintf("%s=%s", k, v))
+			seen[k] = true
+		}
+	}
+	extra := make([]string, 0)
+	for k := range vals {
+		if !seen[k] {
+			extra = append(extra, k)
+		}
+	}
+	sort.Strings(extra)
+	for _, k := range extra {
+		lines = append(lines, fmt.Sprintf("%s=%s", k, vals[k]))
+	}
+	return os.WriteFile(filepath.Clean(".env"), []byte(strings.Join(lines, "\n")+"\n"), 0o600)
+}
+
+func maskSecret(v string) string {
+	if strings.TrimSpace(v) == "" {
+		return ""
+	}
+	return "******"
 }
 
 func parseWindowStart(v string) (time.Time, error) {

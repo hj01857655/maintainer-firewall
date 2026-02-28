@@ -69,6 +69,11 @@ type ActionExecutionFailure struct {
 	SuggestionValue    string    `json:"suggestion_value"`
 	ErrorMessage       string    `json:"error_message"`
 	AttemptCount       int       `json:"attempt_count"`
+	RetryCount         int       `json:"retry_count"`
+	LastRetryStatus    string    `json:"last_retry_status"`
+	LastRetryMessage   string    `json:"last_retry_message"`
+	LastRetryAt        time.Time `json:"last_retry_at,omitempty"`
+	IsResolved         bool      `json:"is_resolved"`
 	OccurredAt         time.Time `json:"occurred_at,omitempty"`
 }
 
@@ -120,11 +125,13 @@ type WebhookStore interface {
 	CreateRule(ctx context.Context, rule RuleRecord) (int64, error)
 	UpdateRuleActive(ctx context.Context, id int64, isActive bool) error
 	SaveActionExecutionFailure(ctx context.Context, item ActionExecutionFailure) error
-	ListActionExecutionFailures(ctx context.Context, limit int, offset int) ([]ActionExecutionFailureRecord, int64, error)
+	ListActionExecutionFailures(ctx context.Context, limit int, offset int, includeResolved bool) ([]ActionExecutionFailureRecord, int64, error)
 	GetActionExecutionFailureByID(ctx context.Context, id int64) (ActionExecutionFailureRecord, error)
+	UpdateActionFailureRetryResult(ctx context.Context, id int64, success bool, message string) error
 	GetWebhookEventPayloadByDeliveryID(ctx context.Context, deliveryID string) (json.RawMessage, error)
 	SaveAuditLog(ctx context.Context, item AuditLogRecord) error
-	ListAuditLogs(ctx context.Context, limit int, offset int, actor string, action string) ([]AuditLogRecord, int64, error)
+	ListAuditLogs(ctx context.Context, limit int, offset int, actor string, action string, since *time.Time) ([]AuditLogRecord, int64, error)
+
 	SaveDeliveryMetric(ctx context.Context, metric DeliveryMetric) error
 	GetMetricsOverview(ctx context.Context, since time.Time) (MetricsOverview, error)
 	GetMetricsTimeSeries(ctx context.Context, since time.Time, intervalMinutes int) ([]MetricsTimePoint, error)
@@ -380,8 +387,9 @@ func (s *WebhookEventStore) SaveActionExecutionFailure(ctx context.Context, item
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO webhook_action_failures (
 			delivery_id, event_type, action, repository_full_name,
-			suggestion_type, suggestion_value, error_message, attempt_count
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+			suggestion_type, suggestion_value, error_message, attempt_count,
+			retry_count, last_retry_status, last_retry_message, last_retry_at, is_resolved
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0,'never','',NULL,FALSE)
 	`, item.DeliveryID, item.EventType, item.Action, item.RepositoryFullName, item.SuggestionType, item.SuggestionValue, item.ErrorMessage, item.AttemptCount)
 	if err != nil {
 		return fmt.Errorf("insert webhook action failure: %w", err)
@@ -389,18 +397,19 @@ func (s *WebhookEventStore) SaveActionExecutionFailure(ctx context.Context, item
 	return nil
 }
 
-func (s *WebhookEventStore) ListActionExecutionFailures(ctx context.Context, limit int, offset int) ([]ActionExecutionFailureRecord, int64, error) {
+func (s *WebhookEventStore) ListActionExecutionFailures(ctx context.Context, limit int, offset int, includeResolved bool) ([]ActionExecutionFailureRecord, int64, error) {
 	var total int64
-	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM webhook_action_failures`).Scan(&total); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM webhook_action_failures WHERE ($1 OR NOT is_resolved)`, includeResolved).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count action failures: %w", err)
 	}
 
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, delivery_id, event_type, action, repository_full_name, suggestion_type, suggestion_value, error_message, attempt_count, occurred_at
+		SELECT id, delivery_id, event_type, action, repository_full_name, suggestion_type, suggestion_value, error_message, attempt_count, retry_count, last_retry_status, last_retry_message, COALESCE(last_retry_at, 'epoch'::timestamptz), is_resolved, occurred_at
 		FROM webhook_action_failures
+		WHERE ($1 OR NOT is_resolved)
 		ORDER BY occurred_at DESC
-		LIMIT $1 OFFSET $2
-	`, limit, offset)
+		LIMIT $2 OFFSET $3
+	`, includeResolved, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("query action failures: %w", err)
 	}
@@ -409,8 +418,11 @@ func (s *WebhookEventStore) ListActionExecutionFailures(ctx context.Context, lim
 	items := make([]ActionExecutionFailureRecord, 0, limit)
 	for rows.Next() {
 		var rec ActionExecutionFailureRecord
-		if err := rows.Scan(&rec.ID, &rec.DeliveryID, &rec.EventType, &rec.Action, &rec.RepositoryFullName, &rec.SuggestionType, &rec.SuggestionValue, &rec.ErrorMessage, &rec.AttemptCount, &rec.OccurredAt); err != nil {
+		if err := rows.Scan(&rec.ID, &rec.DeliveryID, &rec.EventType, &rec.Action, &rec.RepositoryFullName, &rec.SuggestionType, &rec.SuggestionValue, &rec.ErrorMessage, &rec.AttemptCount, &rec.RetryCount, &rec.LastRetryStatus, &rec.LastRetryMessage, &rec.LastRetryAt, &rec.IsResolved, &rec.OccurredAt); err != nil {
 			return nil, 0, fmt.Errorf("scan action failure: %w", err)
+		}
+		if rec.LastRetryAt.Equal(time.Unix(0, 0).UTC()) {
+			rec.LastRetryAt = time.Time{}
 		}
 		items = append(items, rec)
 	}
@@ -423,17 +435,45 @@ func (s *WebhookEventStore) ListActionExecutionFailures(ctx context.Context, lim
 func (s *WebhookEventStore) GetActionExecutionFailureByID(ctx context.Context, id int64) (ActionExecutionFailureRecord, error) {
 	var rec ActionExecutionFailureRecord
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, delivery_id, event_type, action, repository_full_name, suggestion_type, suggestion_value, error_message, attempt_count, occurred_at
+		SELECT id, delivery_id, event_type, action, repository_full_name, suggestion_type, suggestion_value, error_message, attempt_count, retry_count, last_retry_status, last_retry_message, COALESCE(last_retry_at, 'epoch'::timestamptz), is_resolved, occurred_at
 		FROM webhook_action_failures
 		WHERE id = $1
-	`, id).Scan(&rec.ID, &rec.DeliveryID, &rec.EventType, &rec.Action, &rec.RepositoryFullName, &rec.SuggestionType, &rec.SuggestionValue, &rec.ErrorMessage, &rec.AttemptCount, &rec.OccurredAt)
+	`, id).Scan(&rec.ID, &rec.DeliveryID, &rec.EventType, &rec.Action, &rec.RepositoryFullName, &rec.SuggestionType, &rec.SuggestionValue, &rec.ErrorMessage, &rec.AttemptCount, &rec.RetryCount, &rec.LastRetryStatus, &rec.LastRetryMessage, &rec.LastRetryAt, &rec.IsResolved, &rec.OccurredAt)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "no rows") {
 			return rec, fmt.Errorf("action failure not found")
 		}
 		return rec, fmt.Errorf("get action failure by id: %w", err)
 	}
+	if rec.LastRetryAt.Equal(time.Unix(0, 0).UTC()) {
+		rec.LastRetryAt = time.Time{}
+	}
 	return rec, nil
+}
+
+func (s *WebhookEventStore) UpdateActionFailureRetryResult(ctx context.Context, id int64, success bool, message string) error {
+	status := "failed"
+	resolved := false
+	if success {
+		status = "success"
+		resolved = true
+	}
+	result, err := s.pool.Exec(ctx, `
+		UPDATE webhook_action_failures
+		SET retry_count = retry_count + 1,
+		    last_retry_status = $2,
+		    last_retry_message = $3,
+		    last_retry_at = NOW(),
+		    is_resolved = $4
+		WHERE id = $1
+	`, id, status, strings.TrimSpace(message), resolved)
+	if err != nil {
+		return fmt.Errorf("update action failure retry result: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("action failure not found")
+	}
+	return nil
 }
 
 func (s *WebhookEventStore) GetWebhookEventPayloadByDeliveryID(ctx context.Context, deliveryID string) (json.RawMessage, error) {
@@ -459,16 +499,22 @@ func (s *WebhookEventStore) SaveAuditLog(ctx context.Context, item AuditLogRecor
 	return nil
 }
 
-func (s *WebhookEventStore) ListAuditLogs(ctx context.Context, limit int, offset int, actor string, action string) ([]AuditLogRecord, int64, error) {
+func (s *WebhookEventStore) ListAuditLogs(ctx context.Context, limit int, offset int, actor string, action string, since *time.Time) ([]AuditLogRecord, int64, error) {
 	ac := strings.TrimSpace(actor)
 	act := strings.TrimSpace(action)
+	hasSince := since != nil
+	var sinceTime time.Time
+	if since != nil {
+		sinceTime = since.UTC()
+	}
 
 	var total int64
 	if err := s.pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM audit_logs
 		WHERE ($1 = '' OR actor = $1)
 		  AND ($2 = '' OR action = $2)
-	`, ac, act).Scan(&total); err != nil {
+		  AND (NOT $3 OR created_at >= $4)
+	`, ac, act, hasSince, sinceTime).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count audit logs: %w", err)
 	}
 
@@ -477,9 +523,10 @@ func (s *WebhookEventStore) ListAuditLogs(ctx context.Context, limit int, offset
 		FROM audit_logs
 		WHERE ($1 = '' OR actor = $1)
 		  AND ($2 = '' OR action = $2)
+		  AND (NOT $3 OR created_at >= $4)
 		ORDER BY created_at DESC
-		LIMIT $3 OFFSET $4
-	`, ac, act, limit, offset)
+		LIMIT $5 OFFSET $6
+	`, ac, act, hasSince, sinceTime, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("query audit logs: %w", err)
 	}
@@ -518,7 +565,7 @@ func (s *WebhookEventStore) GetMetricsOverview(ctx context.Context, since time.T
 	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM webhook_alerts WHERE created_at >= $1`, since).Scan(&out.Alerts24h); err != nil {
 		return out, fmt.Errorf("count alerts metrics: %w", err)
 	}
-	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM webhook_action_failures WHERE occurred_at >= $1`, since).Scan(&out.Failures24h); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM webhook_action_failures WHERE occurred_at >= $1 AND NOT is_resolved`, since).Scan(&out.Failures24h); err != nil {
 		return out, fmt.Errorf("count failures metrics: %w", err)
 	}
 
@@ -743,6 +790,11 @@ func (s *WebhookEventStore) ensureSchema(ctx context.Context) error {
 			suggestion_value TEXT NOT NULL,
 			error_message TEXT NOT NULL,
 			attempt_count INT NOT NULL,
+			retry_count INT NOT NULL DEFAULT 0,
+			last_retry_status TEXT NOT NULL DEFAULT 'never',
+			last_retry_message TEXT NOT NULL DEFAULT '',
+			last_retry_at TIMESTAMPTZ NULL,
+			is_resolved BOOLEAN NOT NULL DEFAULT FALSE,
 			occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)
 	`)
@@ -765,6 +817,12 @@ func (s *WebhookEventStore) ensureSchema(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("create idx_webhook_action_failures_occurred_at: %w", err)
 	}
+
+	_, _ = s.pool.Exec(ctx, `ALTER TABLE webhook_action_failures ADD COLUMN IF NOT EXISTS retry_count INT NOT NULL DEFAULT 0`)
+	_, _ = s.pool.Exec(ctx, `ALTER TABLE webhook_action_failures ADD COLUMN IF NOT EXISTS last_retry_status TEXT NOT NULL DEFAULT 'never'`)
+	_, _ = s.pool.Exec(ctx, `ALTER TABLE webhook_action_failures ADD COLUMN IF NOT EXISTS last_retry_message TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.pool.Exec(ctx, `ALTER TABLE webhook_action_failures ADD COLUMN IF NOT EXISTS last_retry_at TIMESTAMPTZ NULL`)
+	_, _ = s.pool.Exec(ctx, `ALTER TABLE webhook_action_failures ADD COLUMN IF NOT EXISTS is_resolved BOOLEAN NOT NULL DEFAULT FALSE`)
 
 	_, err = s.pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS audit_logs (

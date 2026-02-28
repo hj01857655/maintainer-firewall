@@ -284,8 +284,9 @@ func (s *MySQLWebhookEventStore) SaveActionExecutionFailure(ctx context.Context,
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO webhook_action_failures (
 			delivery_id, event_type, action, repository_full_name,
-			suggestion_type, suggestion_value, error_message, attempt_count
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			suggestion_type, suggestion_value, error_message, attempt_count,
+			retry_count, last_retry_status, last_retry_message, last_retry_at, is_resolved
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'never', '', NULL, FALSE)
 	`, item.DeliveryID, item.EventType, item.Action, item.RepositoryFullName, item.SuggestionType, item.SuggestionValue, item.ErrorMessage, item.AttemptCount)
 	if err != nil {
 		return fmt.Errorf("insert webhook action failure: %w", err)
@@ -293,18 +294,19 @@ func (s *MySQLWebhookEventStore) SaveActionExecutionFailure(ctx context.Context,
 	return nil
 }
 
-func (s *MySQLWebhookEventStore) ListActionExecutionFailures(ctx context.Context, limit int, offset int) ([]ActionExecutionFailureRecord, int64, error) {
+func (s *MySQLWebhookEventStore) ListActionExecutionFailures(ctx context.Context, limit int, offset int, includeResolved bool) ([]ActionExecutionFailureRecord, int64, error) {
 	var total int64
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM webhook_action_failures`).Scan(&total); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM webhook_action_failures WHERE (? OR NOT is_resolved)`, includeResolved).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count action failures: %w", err)
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, delivery_id, event_type, action, repository_full_name, suggestion_type, suggestion_value, error_message, attempt_count, occurred_at
+		SELECT id, delivery_id, event_type, action, repository_full_name, suggestion_type, suggestion_value, error_message, attempt_count, retry_count, last_retry_status, last_retry_message, last_retry_at, is_resolved, occurred_at
 		FROM webhook_action_failures
+		WHERE (? OR NOT is_resolved)
 		ORDER BY occurred_at DESC
 		LIMIT ? OFFSET ?
-	`, limit, offset)
+	`, includeResolved, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("query action failures: %w", err)
 	}
@@ -313,9 +315,11 @@ func (s *MySQLWebhookEventStore) ListActionExecutionFailures(ctx context.Context
 	items := make([]ActionExecutionFailureRecord, 0, limit)
 	for rows.Next() {
 		var rec ActionExecutionFailureRecord
-		if err := rows.Scan(&rec.ID, &rec.DeliveryID, &rec.EventType, &rec.Action, &rec.RepositoryFullName, &rec.SuggestionType, &rec.SuggestionValue, &rec.ErrorMessage, &rec.AttemptCount, &rec.OccurredAt); err != nil {
+		var lastRetryAt sql.NullTime
+		if err := rows.Scan(&rec.ID, &rec.DeliveryID, &rec.EventType, &rec.Action, &rec.RepositoryFullName, &rec.SuggestionType, &rec.SuggestionValue, &rec.ErrorMessage, &rec.AttemptCount, &rec.RetryCount, &rec.LastRetryStatus, &rec.LastRetryMessage, &lastRetryAt, &rec.IsResolved, &rec.OccurredAt); err != nil {
 			return nil, 0, fmt.Errorf("scan action failure: %w", err)
 		}
+		normalizeLastRetryAt(&rec, lastRetryAt)
 		items = append(items, rec)
 	}
 	if err := rows.Err(); err != nil {
@@ -326,18 +330,57 @@ func (s *MySQLWebhookEventStore) ListActionExecutionFailures(ctx context.Context
 
 func (s *MySQLWebhookEventStore) GetActionExecutionFailureByID(ctx context.Context, id int64) (ActionExecutionFailureRecord, error) {
 	var rec ActionExecutionFailureRecord
+	var lastRetryAt sql.NullTime
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, delivery_id, event_type, action, repository_full_name, suggestion_type, suggestion_value, error_message, attempt_count, occurred_at
+		SELECT id, delivery_id, event_type, action, repository_full_name, suggestion_type, suggestion_value, error_message, attempt_count, retry_count, last_retry_status, last_retry_message, last_retry_at, is_resolved, occurred_at
 		FROM webhook_action_failures
 		WHERE id = ?
-	`, id).Scan(&rec.ID, &rec.DeliveryID, &rec.EventType, &rec.Action, &rec.RepositoryFullName, &rec.SuggestionType, &rec.SuggestionValue, &rec.ErrorMessage, &rec.AttemptCount, &rec.OccurredAt)
+	`, id).Scan(&rec.ID, &rec.DeliveryID, &rec.EventType, &rec.Action, &rec.RepositoryFullName, &rec.SuggestionType, &rec.SuggestionValue, &rec.ErrorMessage, &rec.AttemptCount, &rec.RetryCount, &rec.LastRetryStatus, &rec.LastRetryMessage, &lastRetryAt, &rec.IsResolved, &rec.OccurredAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return rec, fmt.Errorf("action failure not found")
 		}
 		return rec, fmt.Errorf("get action failure by id: %w", err)
 	}
+	normalizeLastRetryAt(&rec, lastRetryAt)
 	return rec, nil
+}
+
+func normalizeLastRetryAt(rec *ActionExecutionFailureRecord, t sql.NullTime) {
+	if !t.Valid {
+		rec.LastRetryAt = time.Time{}
+		return
+	}
+	rec.LastRetryAt = t.Time
+}
+
+func (s *MySQLWebhookEventStore) UpdateActionFailureRetryResult(ctx context.Context, id int64, success bool, message string) error {
+	status := "failed"
+	resolved := false
+	if success {
+		status = "success"
+		resolved = true
+	}
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE webhook_action_failures
+		SET retry_count = retry_count + 1,
+		    last_retry_status = ?,
+		    last_retry_message = ?,
+		    last_retry_at = CURRENT_TIMESTAMP(6),
+		    is_resolved = ?
+		WHERE id = ?
+	`, status, strings.TrimSpace(message), resolved, id)
+	if err != nil {
+		return fmt.Errorf("update action failure retry result: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("get affected rows for action failure retry update: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("action failure not found")
+	}
+	return nil
 }
 
 func (s *MySQLWebhookEventStore) GetWebhookEventPayloadByDeliveryID(ctx context.Context, deliveryID string) (json.RawMessage, error) {
@@ -363,16 +406,22 @@ func (s *MySQLWebhookEventStore) SaveAuditLog(ctx context.Context, item AuditLog
 	return nil
 }
 
-func (s *MySQLWebhookEventStore) ListAuditLogs(ctx context.Context, limit int, offset int, actor string, action string) ([]AuditLogRecord, int64, error) {
+func (s *MySQLWebhookEventStore) ListAuditLogs(ctx context.Context, limit int, offset int, actor string, action string, since *time.Time) ([]AuditLogRecord, int64, error) {
 	ac := strings.TrimSpace(actor)
 	act := strings.TrimSpace(action)
+	hasSince := since != nil
+	sinceTime := time.Unix(0, 0).UTC()
+	if since != nil {
+		sinceTime = since.UTC()
+	}
 
 	var total int64
 	if err := s.db.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM audit_logs
 		WHERE (? = '' OR actor = ?)
 		  AND (? = '' OR action = ?)
-	`, ac, ac, act, act).Scan(&total); err != nil {
+		  AND (NOT ? OR created_at >= ?)
+	`, ac, ac, act, act, hasSince, sinceTime).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count audit logs: %w", err)
 	}
 
@@ -381,9 +430,10 @@ func (s *MySQLWebhookEventStore) ListAuditLogs(ctx context.Context, limit int, o
 		FROM audit_logs
 		WHERE (? = '' OR actor = ?)
 		  AND (? = '' OR action = ?)
+		  AND (NOT ? OR created_at >= ?)
 		ORDER BY created_at DESC
 		LIMIT ? OFFSET ?
-	`, ac, ac, act, act, limit, offset)
+	`, ac, ac, act, act, hasSince, sinceTime, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("query audit logs: %w", err)
 	}
@@ -422,7 +472,7 @@ func (s *MySQLWebhookEventStore) GetMetricsOverview(ctx context.Context, since t
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM webhook_alerts WHERE created_at >= ?`, since).Scan(&out.Alerts24h); err != nil {
 		return out, fmt.Errorf("count alerts metrics: %w", err)
 	}
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM webhook_action_failures WHERE occurred_at >= ?`, since).Scan(&out.Failures24h); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM webhook_action_failures WHERE occurred_at >= ? AND NOT is_resolved`, since).Scan(&out.Failures24h); err != nil {
 		return out, fmt.Errorf("count failures metrics: %w", err)
 	}
 
@@ -569,6 +619,11 @@ func (s *MySQLWebhookEventStore) ensureSchema(ctx context.Context) error {
 			suggestion_value VARCHAR(191) NOT NULL,
 			error_message TEXT NOT NULL,
 			attempt_count INT NOT NULL,
+			retry_count INT NOT NULL DEFAULT 0,
+			last_retry_status VARCHAR(32) NOT NULL DEFAULT 'never',
+			last_retry_message TEXT NOT NULL,
+			last_retry_at DATETIME(6) NULL,
+			is_resolved BOOLEAN NOT NULL DEFAULT FALSE,
 			occurred_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 		`CREATE INDEX idx_webhook_action_failures_delivery ON webhook_action_failures (delivery_id)`,
@@ -605,6 +660,11 @@ func (s *MySQLWebhookEventStore) ensureSchema(ctx context.Context) error {
 			return fmt.Errorf("ensure mysql schema: %w", err)
 		}
 	}
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE webhook_action_failures ADD COLUMN retry_count INT NOT NULL DEFAULT 0`)
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE webhook_action_failures ADD COLUMN last_retry_status VARCHAR(32) NOT NULL DEFAULT 'never'`)
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE webhook_action_failures ADD COLUMN last_retry_message TEXT NOT NULL`)
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE webhook_action_failures ADD COLUMN last_retry_at DATETIME(6) NULL`)
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE webhook_action_failures ADD COLUMN is_resolved BOOLEAN NOT NULL DEFAULT FALSE`)
 	return nil
 }
 
