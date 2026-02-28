@@ -2,12 +2,12 @@
 
 Go + React open-source project skeleton for maintainer workflow automation.
 
-Current status: webhook signature verification + DB event persistence (PostgreSQL/MySQL) + rule suggestion + alerts persistence + configurable rules + auto action execution + JWT-protected API/UI + action retry/failure recording + E2E acceptance script are implemented.
+Current status: webhook signature verification + DB event persistence (PostgreSQL/MySQL) + rule suggestion + alerts persistence + configurable rules + auto action execution + JWT-protected API/UI + action retry/failure recording + metrics/audit/config APIs + E2E acceptance script are implemented.
 
 ## Structure
 
 - `apps/api-go`: Go API service (Gin + PostgreSQL/MySQL event/alert store, supports auto-loading env from `.env` and auto-creating `.env` from `.env.example`)
-- `apps/web-react`: React console (Vite + TS + React Router, dashboard + events + alerts pages)
+- `apps/web-react`: React console (Vite + TS + React Router, login/dashboard/events/alerts/rules/failures/audit/system-config pages)
 - `docs`: architecture/docs (requirements/design/handover)
 
 ## Run API
@@ -35,6 +35,7 @@ Local defaults when omitted (development only):
 - PORT=8080
 - ADMIN_USERNAME=admin
 - ADMIN_PASSWORD=admin123
+- AUTH_ENV_FALLBACK=true (set false to force DB-admin-only login)
 - JWT_SECRET=dev-jwt-secret (or ACCESS_TOKEN fallback)
 - GITHUB_WEBHOOK_SECRET=dev-webhook-secret
 - GITHUB_TOKEN is optional (empty by default)
@@ -45,12 +46,21 @@ API endpoints:
 
 - `GET http://localhost:8080/health`
 - `POST http://localhost:8080/auth/login` (default local account in development: `admin` / `admin123`)
+- `POST http://localhost:8080/webhook/github`
 - `GET http://localhost:8080/events?limit=20&offset=0&event_type=issues&action=opened` (auth required)
   - response includes `total` for pagination
 - `GET http://localhost:8080/alerts?limit=20&offset=0&event_type=issues&action=opened&suggestion_type=label` (auth required)
   - response includes `total` for pagination
 - `GET/POST http://localhost:8080/rules` (auth required)
-- `POST http://localhost:8080/webhook/github`
+- `PATCH http://localhost:8080/rules/:id/active` (auth required)
+- `GET http://localhost:8080/action-failures` (auth required)
+- `POST http://localhost:8080/action-failures/:id/retry` (auth required)
+- `GET http://localhost:8080/audit-logs` (auth required)
+- `GET http://localhost:8080/metrics/overview` (auth required)
+- `GET http://localhost:8080/metrics/timeseries` (auth required)
+- `GET http://localhost:8080/config-status` (auth required)
+- `GET http://localhost:8080/config-view` (auth required)
+- `POST http://localhost:8080/config-update` (auth required)
 
 ## Run Web
 
@@ -63,7 +73,7 @@ npm run dev
 Web app:
 
 - `http://localhost:5173`
-- automatically proxies `/health` / `/auth` / `/events` / `/alerts` / `/rules` to `http://localhost:8080`
+- automatically proxies `/health` / `/auth` / `/events` / `/alerts` / `/rules` / `/action-failures` / `/audit-logs` / `/metrics` / `/config-*` to `http://localhost:8080`
 
 ## Docs
 
@@ -115,6 +125,7 @@ What it verifies automatically:
 - events/alerts contain the new delivery_id
 - alerts include expected suggestion value
 - works with either PostgreSQL or MySQL via `-DatabaseURL`
+- webhook payload now requires real test target parameters (`-GitHubTestRepo`, `-GitHubTestIssueNumber`) to avoid placeholder dirty data
 
 ## Quick API check (manual)
 
@@ -129,6 +140,14 @@ Invoke-RestMethod "http://localhost:8080/events?limit=20&offset=0&event_type=iss
 
 # list alerts (auth required)
 Invoke-RestMethod "http://localhost:8080/alerts?limit=20&offset=0&event_type=issues&action=opened&suggestion_type=label" -Headers $headers
+
+# list failures and retry one item
+Invoke-RestMethod "http://localhost:8080/action-failures?limit=20&offset=0&include_resolved=true" -Headers $headers
+# Invoke-RestMethod -Method Post "http://localhost:8080/action-failures/<ID>/retry" -Headers $headers
+
+# metrics and audit
+Invoke-RestMethod "http://localhost:8080/metrics/overview?window=24h" -Headers $headers
+Invoke-RestMethod "http://localhost:8080/audit-logs?limit=20&offset=0" -Headers $headers
 ```
 
 ## CI
@@ -142,21 +161,21 @@ Invoke-RestMethod "http://localhost:8080/alerts?limit=20&offset=0&event_type=iss
 - Persist webhook events
 - Rule suggestion generation (`label` / `comment`)
 - Persist rule-hit alerts
-- Configurable rules API (`GET/POST /rules`)
+- Configurable rules API (`GET/POST /rules`, `PATCH /rules/:id/active`)
 - Auto execute GitHub actions (label/comment)
-- Action retry + failure recording (`webhook_action_failures`)
+- Action retry + failure recording (`webhook_action_failures`) + retry API
 - Login + protected API/UI routes (JWT)
-
-- Query alerts with pagination/filter + `total`
-- Web pages for events/alerts
+- Query alerts/events with pagination/filter + `total`
+- Failures/audit/metrics/config APIs
+- Console pages: events/alerts/rules/failures/audit/system-config
 - CI checks for API/Web build
 
 ## Secondary (next)
 
+- Auto bootstrap first DB admin user (reduce manual setup)
 - Dashboard alert summary widgets
 - Rich filters (repository/sender/date range)
 - Export & reporting
-
 ## License
 
 MIT

@@ -4,6 +4,8 @@ param(
   [string]$JWTSecret = "CHANGE_ME_JWT_SECRET",
   [string]$GitHubWebhookSecret = "CHANGE_ME_WEBHOOK_SECRET",
   [string]$GitHubToken = "",
+  [string]$GitHubTestRepo = "",
+  [int]$GitHubTestIssueNumber = 0,
   [string]$DatabaseURL = "postgres://<user>:<password>@localhost:5432/maintainer_firewall?sslmode=disable",
   [int]$ApiPort = 8080,
   [int]$WebPort = 5173,
@@ -57,6 +59,12 @@ if ($DatabaseURL -like 'postgres://<user>:<password>*') {
 }
 if ($DatabaseURL -like 'mysql://<*') {
   throw 'Please provide real MySQL URL via -DatabaseURL'
+}
+if ([string]::IsNullOrWhiteSpace($GitHubTestRepo)) {
+  throw 'Please provide real GitHub repo via -GitHubTestRepo (format: owner/repo)'
+}
+if ($GitHubTestIssueNumber -le 0) {
+  throw 'Please provide real issue number via -GitHubTestIssueNumber (>0)'
 }
 $cleanupApi = -not $KeepApiRunning
 $cleanupWeb = $StartWeb -and (-not $KeepWebRunning)
@@ -113,7 +121,13 @@ Write-Host "[E2E 4/8] Login... (username=$AdminUsername)" -ForegroundColor Cyan
 
   Write-Host "[E2E 6/8] Send webhook..." -ForegroundColor Cyan
   $deliveryId = "e2e-" + [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-  $payload = '{"action":"opened","repository":{"full_name":"owner/repo"},"sender":{"login":"alice"},"issue":{"number":321,"title":"urgent issue from e2e"}}'
+  $payloadObj = @{
+    action = "opened"
+    repository = @{ full_name = $GitHubTestRepo }
+    sender = @{ login = "alice" }
+    issue = @{ number = $GitHubTestIssueNumber; title = "urgent issue from e2e" }
+  }
+  $payload = $payloadObj | ConvertTo-Json -Compress
   $hmac = New-Object System.Security.Cryptography.HMACSHA256
   $hmac.Key = [Text.Encoding]::UTF8.GetBytes($GitHubWebhookSecret)
   $hash = $hmac.ComputeHash([Text.Encoding]::UTF8.GetBytes($payload))
