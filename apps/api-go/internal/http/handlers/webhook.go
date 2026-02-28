@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"maintainer-firewall/api-go/internal/service"
 	"maintainer-firewall/api-go/internal/store"
 
 	"github.com/gin-gonic/gin"
@@ -21,18 +22,24 @@ type WebhookEventSaver interface {
 }
 
 type WebhookHandler struct {
-	Secret string
-	Store  WebhookEventSaver
+	Secret     string
+	Store      WebhookEventSaver
+	RuleEngine *service.RuleEngine
 }
 
 type webhookResponse struct {
-	OK      bool   `json:"ok"`
-	Message string `json:"message,omitempty"`
-	Event   string `json:"event,omitempty"`
+	OK               bool                      `json:"ok"`
+	Message          string                    `json:"message,omitempty"`
+	Event            string                    `json:"event,omitempty"`
+	SuggestedActions []service.SuggestedAction `json:"suggested_actions,omitempty"`
 }
 
 func NewWebhookHandler(secret string, eventStore WebhookEventSaver) *WebhookHandler {
-	return &WebhookHandler{Secret: secret, Store: eventStore}
+	return &WebhookHandler{
+		Secret:     secret,
+		Store:      eventStore,
+		RuleEngine: service.NewRuleEngine(),
+	}
 }
 
 func (h *WebhookHandler) GitHub(c *gin.Context) {
@@ -95,10 +102,16 @@ func (h *WebhookHandler) GitHub(c *gin.Context) {
 		return
 	}
 
+	suggestions := []service.SuggestedAction{}
+	if h.RuleEngine != nil {
+		suggestions = h.RuleEngine.Evaluate(eventType, payload)
+	}
+
 	c.JSON(200, webhookResponse{
-		OK:      true,
-		Message: fmt.Sprintf("webhook accepted (action=%s)", action),
-		Event:   eventType,
+		OK:               true,
+		Message:          fmt.Sprintf("webhook accepted (action=%s)", action),
+		Event:            eventType,
+		SuggestedActions: suggestions,
 	})
 }
 

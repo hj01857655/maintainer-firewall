@@ -2,10 +2,11 @@
 
 ## 1. Scope
 
-This design covers M3 and current M4 base:
+This design covers M3, M4, and M5-v1:
 
 - M3: persist verified GitHub webhook events into PostgreSQL
 - M4 base: query and display latest events via API + React console
+- M5-v1: rule engine returns suggested label/comment actions
 
 ## 2. Runtime Components
 
@@ -25,7 +26,8 @@ This design covers M3 and current M4 base:
 3. Handler extracts metadata from headers and JSON payload
 4. Handler writes event into PostgreSQL table `webhook_events`
 5. Handler returns `200` when accepted and persisted
-6. React console calls `GET /events` to render latest records
+6. Rule engine evaluates payload text and produces suggested actions
+7. React console calls `GET /events` to render latest records
 
 ## 4. Data Model
 
@@ -82,3 +84,22 @@ Next:
 - Add filters by `event_type` and `action`
 - Add total count and pagination controls in UI
 - Add endpoint tests for list/query validation
+
+## 9. M5 Rule Engine v1
+
+Implemented:
+
+- Added keyword-based rule engine for `issues` and `pull_request` events
+- Returns suggested actions in webhook response:
+  - `label` suggestion
+  - `comment` suggestion
+
+Current built-in keyword rules:
+
+- `duplicate` -> `needs-triage`
+- `help wanted` -> `help-wanted`
+- `urgent` -> `priority-high`
+
+Response contract update:
+
+- `POST /webhook/github` now may include `suggested_actions` array

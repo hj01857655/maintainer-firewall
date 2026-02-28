@@ -53,7 +53,11 @@ Build a self-hostable service that helps maintainers reduce noisy triage work an
 
 ### FR-4 Basic Console
 - React page to show API health status
-- (Next step) event list page with latest records
+- Event list page with latest records
+
+### FR-5 Rule Suggestion Engine (M5-v1)
+- For `issues` and `pull_request` events, run keyword-based rule matching
+- Return suggested actions in webhook response (`label` / `comment`)
 
 ## 7. Non-Functional Requirements
 
@@ -70,17 +74,19 @@ For MVP completion, all are required:
 1. Webhook endpoint works with signature validation.
 2. Valid events are persisted in PostgreSQL.
 3. Invalid signatures return `401` and are not persisted.
-4. `go build ./...` passes.
-5. `npm run build` passes.
-6. README/docs include setup and run instructions.
+4. Event list endpoint returns latest records.
+5. Rule engine returns suggested actions for matched keywords.
+6. `go build ./...` passes.
+7. `npm run build` passes.
+8. README/docs include setup and run instructions.
 
 ## 9. Milestones
 
 - **M1**: Go + React skeleton, health endpoint, GitHub repo setup (done)
 - **M2**: Webhook endpoint + signature validation (done)
-- **M3**: PostgreSQL persistence for webhook events (next)
-- **M4**: Event list page + basic filtering
-- **M5**: Rule engine v1 (label/reply suggestion)
+- **M3**: PostgreSQL persistence for webhook events (done)
+- **M4**: Event list page + basic filtering (base list done)
+- **M5**: Rule engine v1 (label/reply suggestion) (done: webhook response suggestions)
 
 ## 10. Risks and Mitigations
 
@@ -89,4 +95,4 @@ For MVP completion, all are required:
 - **Risk**: DB connection instability
   - **Mitigation**: Connection pooling + retry strategy + clear error paths.
 - **Risk**: Scope creep
-  - **Mitigation**: Freeze MVP scope to FR-1..FR-4.
+  - **Mitigation**: Freeze MVP scope to FR-1..FR-5.
