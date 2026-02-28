@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"maintainer-firewall/api-go/internal/service"
@@ -24,9 +25,24 @@ type GitHubEventTypesProvider interface {
 	ListRecentEvents(ctx context.Context) ([]service.GitHubUserEvent, error)
 }
 
+type GitHubSyncStatus struct {
+	Running        bool       `json:"running"`
+	LastStartedAt  *time.Time `json:"last_started_at,omitempty"`
+	LastFinishedAt *time.Time `json:"last_finished_at,omitempty"`
+	LastSuccessAt  *time.Time `json:"last_success_at,omitempty"`
+	LastSaved      int        `json:"last_saved"`
+	LastTotal      int        `json:"last_total"`
+	LastError      string     `json:"last_error,omitempty"`
+	SuccessCount   int64      `json:"success_count"`
+	FailureCount   int64      `json:"failure_count"`
+}
+
 type EventsHandler struct {
 	Store          WebhookEventStore
 	GitHubProvider GitHubEventTypesProvider
+
+	syncMu     sync.Mutex
+	syncStatus GitHubSyncStatus
 }
 
 type listEventsResponse struct {
@@ -59,11 +75,11 @@ func (h *EventsHandler) List(c *gin.Context) {
 			if err != nil {
 				status := http.StatusBadGateway
 				errMsg := strings.ToLower(err.Error())
-				if strings.Contains(errMsg, "not configured") {
+				if strings.Contains(errMsg, "not configured") || strings.Contains(errMsg, "save github event failed") {
 					status = http.StatusInternalServerError
 				}
-				if strings.Contains(errMsg, "save github event failed") {
-					status = http.StatusInternalServerError
+				if strings.Contains(errMsg, "already running") {
+					status = http.StatusConflict
 				}
 				c.JSON(status, gin.H{"ok": false, "message": err.Error()})
 				return
@@ -138,15 +154,44 @@ func (h *EventsHandler) List(c *gin.Context) {
 }
 
 func (h *EventsHandler) SyncGitHubEvents(ctx context.Context) (int, int, error) {
+	h.syncMu.Lock()
+	if h.syncStatus.Running {
+		h.syncMu.Unlock()
+		return 0, 0, fmt.Errorf("github events sync is already running")
+	}
+	now := time.Now().UTC()
+	h.syncStatus.Running = true
+	h.syncStatus.LastStartedAt = &now
+	h.syncMu.Unlock()
+
+	finish := func(saved int, total int, err error) (int, int, error) {
+		h.syncMu.Lock()
+		defer h.syncMu.Unlock()
+		ended := time.Now().UTC()
+		h.syncStatus.Running = false
+		h.syncStatus.LastFinishedAt = &ended
+		h.syncStatus.LastSaved = saved
+		h.syncStatus.LastTotal = total
+		if err != nil {
+			h.syncStatus.LastError = err.Error()
+			h.syncStatus.FailureCount++
+			return saved, total, err
+		}
+		h.syncStatus.LastError = ""
+		h.syncStatus.SuccessCount++
+		h.syncStatus.LastSuccessAt = &ended
+		return saved, total, nil
+	}
+
 	if h.GitHubProvider == nil {
-		return 0, 0, fmt.Errorf("github provider is not configured")
+		return finish(0, 0, fmt.Errorf("github provider is not configured"))
 	}
 	if h.Store == nil {
-		return 0, 0, fmt.Errorf("event store is not configured")
+		return finish(0, 0, fmt.Errorf("event store is not configured"))
 	}
 	events, err := h.GitHubProvider.ListRecentEvents(ctx)
 	if err != nil {
-		return 0, 0, fmt.Errorf("sync github events failed: %w", err)
+		return finish(0, 0, fmt.Errorf("sync github events failed: %w", err))
 	}
 	saved := 0
 	for _, evt := range events {
@@ -159,11 +204,22 @@ func (h *EventsHandler) SyncGitHubEvents(ctx context.Context) (int, int, error) 
 			PayloadJSON:        evt.PayloadJSON,
 		})
 		if saveErr != nil {
-			return saved, len(events), fmt.Errorf("save github event failed: %w", saveErr)
+			return finish(saved, len(events), fmt.Errorf("save github event failed: %w", saveErr))
 		}
 		saved++
 	}
-	return saved, len(events), nil
+	return finish(saved, len(events), nil)
+}
+
+func (h *EventsHandler) GitHubSyncStatus(c *gin.Context) {
+	h.syncMu.Lock()
+	status := h.syncStatus
+	h.syncMu.Unlock()
+	c.JSON(http.StatusOK, gin.H{
+		"ok":     true,
+		"source": "github",
+		"status": status,
+	})
 }
 
 func parseIntOrDefault(v string, fallback int) int {

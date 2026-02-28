@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -303,5 +304,34 @@ func TestEventsSyncGitHubEvents_StoreNotConfigured(t *testing.T) {
 	_, _, err := h.SyncGitHubEvents(context.Background())
 	if err == nil {
 		t.Fatalf("expected error")
+	}
+}
+
+func TestEventsSyncGitHubEvents_AlreadyRunning(t *testing.T) {
+	h := NewEventsHandler(&mockEventsStore{}, &mockGitHubEventTypesProvider{events: []service.GitHubUserEvent{}})
+	h.syncStatus.Running = true
+	_, _, err := h.SyncGitHubEvents(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("expected already running error, got %v", err)
+	}
+}
+
+func TestEventsGitHubSyncStatus(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewEventsHandler(&mockEventsStore{}, &mockGitHubEventTypesProvider{})
+	r := gin.New()
+	r.GET("/events/sync-status", h.GitHubSyncStatus)
+
+	req := httptest.NewRequest(http.MethodGet, "/events/sync-status", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if ok, _ := resp["ok"].(bool); !ok {
+		t.Fatalf("expected ok=true, body=%s", w.Body.String())
 	}
 }

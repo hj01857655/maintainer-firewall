@@ -46,13 +46,13 @@ export function AppLayout({ children }: Props) {
 
           <nav className="mt-4 grid grid-cols-2 gap-2 lg:mt-6 lg:grid-cols-1" aria-label={t('nav.main')}>
             <NavItem to="/dashboard" label={t('nav.dashboard')} />
-            <NavItem to="/guide" label={t('nav.guide')} />
             <NavItem to="/events" label={t('nav.events')} />
             <NavItem to="/alerts" label={t('nav.alerts')} />
             <NavItem to="/rules" label={t('nav.rules')} />
             <NavItem to="/failures" label={t('nav.failures')} />
             <NavItem to="/audit" label={t('nav.audit')} />
             <NavItem to="/system-config" label={t('nav.systemConfig')} />
+            <NavItem to="/guide" label={t('nav.guide')} />
           </nav>
         </aside>
 
