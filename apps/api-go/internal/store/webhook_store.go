@@ -60,6 +60,16 @@ type RuleRecord struct {
 	CreatedAt       time.Time `json:"created_at"`
 }
 
+type AdminUser struct {
+	ID           int64      `json:"id"`
+	Username     string     `json:"username"`
+	PasswordHash string     `json:"password_hash"`
+	IsActive     bool       `json:"is_active"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+	LastLoginAt  *time.Time `json:"last_login_at,omitempty"`
+}
+
 type ActionExecutionFailure struct {
 	DeliveryID         string    `json:"delivery_id"`
 	EventType          string    `json:"event_type"`
@@ -131,6 +141,9 @@ type WebhookStore interface {
 	GetWebhookEventPayloadByDeliveryID(ctx context.Context, deliveryID string) (json.RawMessage, error)
 	SaveAuditLog(ctx context.Context, item AuditLogRecord) error
 	ListAuditLogs(ctx context.Context, limit int, offset int, actor string, action string, since *time.Time) ([]AuditLogRecord, int64, error)
+	GetAdminUserByUsername(ctx context.Context, username string) (AdminUser, error)
+	UpdateAdminUserLastLogin(ctx context.Context, id int64, at time.Time) error
+	EnsureBootstrapAdminUser(ctx context.Context, username string, passwordHash string) error
 
 	SaveDeliveryMetric(ctx context.Context, metric DeliveryMetric) error
 	GetMetricsOverview(ctx context.Context, since time.Time) (MetricsOverview, error)
@@ -499,6 +512,66 @@ func (s *WebhookEventStore) SaveAuditLog(ctx context.Context, item AuditLogRecor
 	return nil
 }
 
+func (s *WebhookEventStore) GetAdminUserByUsername(ctx context.Context, username string) (AdminUser, error) {
+	var user AdminUser
+	var lastLoginAt time.Time
+	name := strings.TrimSpace(username)
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, username, password_hash, is_active, created_at, updated_at, COALESCE(last_login_at, 'epoch'::timestamptz)
+		FROM admin_users
+		WHERE username = $1
+		LIMIT 1
+	`, name).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsActive, &user.CreatedAt, &user.UpdatedAt, &lastLoginAt)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "no rows") {
+			return user, fmt.Errorf("admin user not found")
+		}
+		return user, fmt.Errorf("get admin user by username: %w", err)
+	}
+	if !lastLoginAt.Equal(time.Unix(0, 0).UTC()) {
+		ts := lastLoginAt.UTC()
+		user.LastLoginAt = &ts
+	}
+	return user, nil
+}
+
+func (s *WebhookEventStore) UpdateAdminUserLastLogin(ctx context.Context, id int64, at time.Time) error {
+	result, err := s.pool.Exec(ctx, `UPDATE admin_users SET last_login_at = $2, updated_at = NOW() WHERE id = $1`, id, at.UTC())
+	if err != nil {
+		return fmt.Errorf("update admin user last login: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("admin user not found")
+	}
+	return nil
+}
+
+func (s *WebhookEventStore) EnsureBootstrapAdminUser(ctx context.Context, username string, passwordHash string) error {
+	name := strings.TrimSpace(username)
+	hash := strings.TrimSpace(passwordHash)
+	if name == "" || hash == "" {
+		return nil
+	}
+
+	var total int64
+	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM admin_users`).Scan(&total); err != nil {
+		return fmt.Errorf("count admin users: %w", err)
+	}
+	if total > 0 {
+		return nil
+	}
+
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO admin_users (username, password_hash, is_active)
+		VALUES ($1, $2, TRUE)
+		ON CONFLICT (username) DO NOTHING
+	`, name, hash)
+	if err != nil {
+		return fmt.Errorf("bootstrap admin user: %w", err)
+	}
+	return nil
+}
+
 func (s *WebhookEventStore) ListAuditLogs(ctx context.Context, limit int, offset int, actor string, action string, since *time.Time) ([]AuditLogRecord, int64, error) {
 	ac := strings.TrimSpace(actor)
 	act := strings.TrimSpace(action)
@@ -848,6 +921,29 @@ func (s *WebhookEventStore) ensureSchema(ctx context.Context) error {
 	}
 
 	_, err = s.pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS admin_users (
+			id BIGSERIAL PRIMARY KEY,
+			username TEXT NOT NULL UNIQUE,
+			password_hash TEXT NOT NULL,
+			is_active BOOLEAN NOT NULL DEFAULT TRUE,
+			last_login_at TIMESTAMPTZ NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("create admin_users table: %w", err)
+	}
+
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_admin_users_is_active
+		ON admin_users (is_active)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_admin_users_is_active: %w", err)
+	}
+
+	_, err = s.pool.Exec(ctx, `
 		CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_action
 		ON audit_logs (actor, action)
 	`)
@@ -877,6 +973,17 @@ func (s *WebhookEventStore) ensureSchema(ctx context.Context) error {
 		return fmt.Errorf("create idx_webhook_delivery_metrics_recorded_at: %w", err)
 	}
 
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_admin_users_username
+		ON admin_users (username)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_admin_users_username: %w", err)
+	}
+
+	_, _ = s.pool.Exec(ctx, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ NULL`)
+	_, _ = s.pool.Exec(ctx, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`)
+
 	return nil
 }
 
@@ -890,6 +997,5 @@ func IsDuplicateKeyError(err error) bool {
 	if errors.As(err, &mysqlErr) {
 		return mysqlErr.Number == 1062
 	}
-
 	return false
 }

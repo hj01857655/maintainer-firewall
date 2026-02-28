@@ -104,11 +104,15 @@ func (h *ActionFailureRetryHandler) Retry(c *gin.Context) {
 		})
 
 		status := http.StatusBadGateway
+		message := fmt.Sprintf("retry failed: %v", err)
 		errMsg := strings.ToLower(err.Error())
-		if strings.Contains(errMsg, "not configured") || strings.Contains(errMsg, "invalid ") || strings.Contains(errMsg, "empty ") || strings.Contains(errMsg, "unsupported") {
+		if strings.Contains(errMsg, "github api status: 404") {
+			status = http.StatusBadRequest
+			message = "retry failed: target issue/pr not found or inaccessible on GitHub"
+		} else if strings.Contains(errMsg, "not configured") || strings.Contains(errMsg, "invalid ") || strings.Contains(errMsg, "empty ") || strings.Contains(errMsg, "unsupported") {
 			status = http.StatusBadRequest
 		}
-		c.JSON(status, gin.H{"ok": false, "message": fmt.Sprintf("retry failed: %v", err)})
+		c.JSON(status, gin.H{"ok": false, "message": message})
 		return
 	}
 

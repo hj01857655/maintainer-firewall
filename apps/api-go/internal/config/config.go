@@ -15,6 +15,8 @@ type Config struct {
 	AdminPassword       string
 	JWTSecret           string
 	DatabaseURL         string
+	AuthEnvFallback     bool
+	BootstrapAdmin      bool
 }
 
 func Load() Config {
@@ -24,6 +26,8 @@ func Load() Config {
 	adminUsername := getenvOrDefault("ADMIN_USERNAME", "admin")
 	adminPassword := getenvOrDefault("ADMIN_PASSWORD", "admin123")
 	githubWebhookSecret := getenvOrDefault("GITHUB_WEBHOOK_SECRET", "dev-webhook-secret")
+	authEnvFallback := strings.ToLower(strings.TrimSpace(getenvOrDefault("AUTH_ENV_FALLBACK", "true"))) != "false"
+	bootstrapAdmin := strings.ToLower(strings.TrimSpace(getenvOrDefault("BOOTSTRAP_ADMIN_ON_START", "true"))) != "false"
 
 	jwtSecret := os.Getenv("JWT_SECRET")
 	if jwtSecret == "" {
@@ -41,6 +45,8 @@ func Load() Config {
 		AdminPassword:       adminPassword,
 		JWTSecret:           jwtSecret,
 		DatabaseURL:         os.Getenv("DATABASE_URL"),
+		AuthEnvFallback:     authEnvFallback,
+		BootstrapAdmin:      bootstrapAdmin,
 	}
 }
 

@@ -453,6 +453,70 @@ func (s *MySQLWebhookEventStore) ListAuditLogs(ctx context.Context, limit int, o
 	return items, total, nil
 }
 
+func (s *MySQLWebhookEventStore) GetAdminUserByUsername(ctx context.Context, username string) (AdminUser, error) {
+	var user AdminUser
+	var lastLogin sql.NullTime
+	name := strings.TrimSpace(username)
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id, username, password_hash, is_active, created_at, updated_at, last_login_at
+		FROM admin_users
+		WHERE username = ?
+		LIMIT 1
+	`, name).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsActive, &user.CreatedAt, &user.UpdatedAt, &lastLogin)
+	if err != nil {
+	if errors.Is(err, sql.ErrNoRows) {
+			return user, fmt.Errorf("admin user not found")
+		}
+		return user, fmt.Errorf("get admin user by username: %w", err)
+	}
+	if lastLogin.Valid {
+		t := lastLogin.Time.UTC()
+		user.LastLoginAt = &t
+	}
+	return user, nil
+}
+
+func (s *MySQLWebhookEventStore) UpdateAdminUserLastLogin(ctx context.Context, id int64, at time.Time) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE admin_users SET last_login_at = ?, updated_at = CURRENT_TIMESTAMP(6) WHERE id = ?`, at.UTC(), id)
+	if err != nil {
+		return fmt.Errorf("update admin user last login: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("get affected rows for admin user update: %w", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("admin user not found")
+	}
+	return nil
+}
+
+func (s *MySQLWebhookEventStore) EnsureBootstrapAdminUser(ctx context.Context, username string, passwordHash string) error {
+	name := strings.TrimSpace(username)
+	hash := strings.TrimSpace(passwordHash)
+	if name == "" || hash == "" {
+		return nil
+	}
+
+	var total int64
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM admin_users`).Scan(&total); err != nil {
+		return fmt.Errorf("count admin users: %w", err)
+	}
+	if total > 0 {
+		return nil
+	}
+
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO admin_users (username, password_hash, is_active)
+		VALUES (?, ?, TRUE)
+		ON DUPLICATE KEY UPDATE username = username
+	`, name, hash)
+	if err != nil {
+		return fmt.Errorf("bootstrap admin user: %w", err)
+	}
+	return nil
+}
+
 func (s *MySQLWebhookEventStore) SaveDeliveryMetric(ctx context.Context, metric DeliveryMetric) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO webhook_delivery_metrics (event_type, delivery_id, success, processing_ms, recorded_at)
@@ -641,6 +705,18 @@ func (s *MySQLWebhookEventStore) ensureSchema(ctx context.Context) error {
 		`CREATE INDEX idx_audit_logs_created_at ON audit_logs (created_at)`,
 		`CREATE INDEX idx_audit_logs_actor_action ON audit_logs (actor, action)`,
 
+		`CREATE TABLE IF NOT EXISTS admin_users (
+			id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+			username VARCHAR(191) NOT NULL,
+			password_hash VARCHAR(255) NOT NULL,
+			is_active BOOLEAN NOT NULL DEFAULT TRUE,
+			last_login_at DATETIME(6) NULL,
+			created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+			updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+			UNIQUE KEY uk_admin_users_username (username)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+		`CREATE INDEX idx_admin_users_is_active ON admin_users (is_active)`,
+
 		`CREATE TABLE IF NOT EXISTS webhook_delivery_metrics (
 			id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
 			event_type VARCHAR(128) NOT NULL,
@@ -665,6 +741,8 @@ func (s *MySQLWebhookEventStore) ensureSchema(ctx context.Context) error {
 	_, _ = s.db.ExecContext(ctx, `ALTER TABLE webhook_action_failures ADD COLUMN last_retry_message TEXT NOT NULL`)
 	_, _ = s.db.ExecContext(ctx, `ALTER TABLE webhook_action_failures ADD COLUMN last_retry_at DATETIME(6) NULL`)
 	_, _ = s.db.ExecContext(ctx, `ALTER TABLE webhook_action_failures ADD COLUMN is_resolved BOOLEAN NOT NULL DEFAULT FALSE`)
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE admin_users ADD COLUMN last_login_at DATETIME(6) NULL`)
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE admin_users ADD COLUMN updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)`)
 	return nil
 }
 

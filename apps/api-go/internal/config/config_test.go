@@ -16,6 +16,8 @@ func TestLoad_UsesDevDefaultsWhenEnvMissing(t *testing.T) {
 	t.Setenv("JWT_SECRET", "")
 	t.Setenv("ACCESS_TOKEN", "")
 	t.Setenv("DATABASE_URL", "")
+	t.Setenv("AUTH_ENV_FALLBACK", "")
+	t.Setenv("BOOTSTRAP_ADMIN_ON_START", "")
 	t.Setenv("BREEZELL_TEST_DOTENV_CONTENT", "")
 	t.Setenv("BREEZELL_TEST_DOTENV_PATH", filepath.Join(t.TempDir(), "not-found.env"))
 
@@ -38,6 +40,34 @@ func TestLoad_UsesDevDefaultsWhenEnvMissing(t *testing.T) {
 	}
 	if cfg.DatabaseURL != "" {
 		t.Fatalf("expected database url to stay empty when not set, got %q", cfg.DatabaseURL)
+	}
+	if !cfg.AuthEnvFallback {
+		t.Fatalf("expected default AUTH_ENV_FALLBACK=true")
+	}
+	if !cfg.BootstrapAdmin {
+		t.Fatalf("expected default BOOTSTRAP_ADMIN_ON_START=true")
+	}
+}
+
+func TestLoad_BootstrapAdminFalse(t *testing.T) {
+	t.Setenv("BOOTSTRAP_ADMIN_ON_START", "false")
+	t.Setenv("BREEZELL_TEST_DOTENV_CONTENT", "")
+	t.Setenv("BREEZELL_TEST_DOTENV_PATH", filepath.Join(t.TempDir(), "not-found.env"))
+
+	cfg := Load()
+	if cfg.BootstrapAdmin {
+		t.Fatalf("expected BOOTSTRAP_ADMIN_ON_START=false")
+	}
+}
+
+func TestLoad_AuthEnvFallbackFalse(t *testing.T) {
+	t.Setenv("AUTH_ENV_FALLBACK", "false")
+	t.Setenv("BREEZELL_TEST_DOTENV_CONTENT", "")
+	t.Setenv("BREEZELL_TEST_DOTENV_PATH", filepath.Join(t.TempDir(), "not-found.env"))
+
+	cfg := Load()
+	if cfg.AuthEnvFallback {
+		t.Fatalf("expected AUTH_ENV_FALLBACK=false")
 	}
 }
 
@@ -62,8 +92,10 @@ func TestLoad_UsesDotenvWhenEnvMissing(t *testing.T) {
 	t.Setenv("JWT_SECRET", "")
 	t.Setenv("ACCESS_TOKEN", "")
 	t.Setenv("DATABASE_URL", "")
+	t.Setenv("AUTH_ENV_FALLBACK", "")
+	t.Setenv("BOOTSTRAP_ADMIN_ON_START", "")
 
-	t.Setenv("BREEZELL_TEST_DOTENV_CONTENT", "DATABASE_URL=mysql://dotenv-user:dotenv-pass@127.0.0.1:3306/dotenv_db\nADMIN_USERNAME=dotenv-admin\nJWT_SECRET=dotenv-jwt")
+	t.Setenv("BREEZELL_TEST_DOTENV_CONTENT", "DATABASE_URL=mysql://dotenv-user:dotenv-pass@127.0.0.1:3306/dotenv_db\nADMIN_USERNAME=dotenv-admin\nJWT_SECRET=dotenv-jwt\nAUTH_ENV_FALLBACK=false\nBOOTSTRAP_ADMIN_ON_START=false")
 	t.Setenv("BREEZELL_TEST_DOTENV_PATH", "")
 
 	cfg := Load()
@@ -75,6 +107,12 @@ func TestLoad_UsesDotenvWhenEnvMissing(t *testing.T) {
 	}
 	if cfg.JWTSecret != "dotenv-jwt" {
 		t.Fatalf("expected JWT_SECRET from dotenv, got %q", cfg.JWTSecret)
+	}
+	if cfg.AuthEnvFallback {
+		t.Fatalf("expected AUTH_ENV_FALLBACK from dotenv to be false")
+	}
+	if cfg.BootstrapAdmin {
+		t.Fatalf("expected BOOTSTRAP_ADMIN_ON_START from dotenv to be false")
 	}
 }
 
