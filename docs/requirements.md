@@ -34,7 +34,10 @@ Build a self-hostable service that helps maintainers reduce noisy triage work an
 - Return clear status for invalid signature / malformed payload
 
 ### FR-2 Event Persistence
-- Save each accepted event to PostgreSQL
+- Save accepted events to PostgreSQL from two sources:
+  - verified webhook ingest (`POST /webhook/github`)
+  - GitHub pull sync (`GET /events?source=github&sync=true`)
+- Event persistence must be idempotent by `delivery_id`.
 - Minimum fields:
   - `delivery_id`
   - `event_type`
@@ -46,21 +49,30 @@ Build a self-hostable service that helps maintainers reduce noisy triage work an
 
 ### FR-3 Runtime Config + Health
 - `GET /health`
+- Runtime config APIs (protected):
+  - `GET /config-status`
+  - `GET /config-view`
+  - `POST /config-update`
 - Environment-driven config:
   - `PORT`
   - `GITHUB_WEBHOOK_SECRET`
   - `DATABASE_URL`
   - `ADMIN_USERNAME`
   - `ADMIN_PASSWORD`
+  - `AUTH_ENV_FALLBACK` (whether auth can fallback to env credentials when DB admin user is missing)
   - `JWT_SECRET` (preferred)
   - `ACCESS_TOKEN` (legacy fallback secret)
   - `GITHUB_TOKEN` (optional for auto actions)
 
 ### FR-4 Console (Protected)
 - React login page (`/login`)
-- Protected console routes (dashboard/events/alerts)
+- Protected console routes (dashboard/events/alerts/rules/failures/audit/system-config)
 - Event list page with latest records
 - Alerts list page with latest records
+- Rules page with status toggle
+- Failures page with retry actions and status hints
+- Audit logs page with filters
+- System config page for runtime env update
 
 ### FR-5 Rule Engine + Configurable Rules
 - For `issues` and `pull_request` events, run rule matching
@@ -82,13 +94,32 @@ Build a self-hostable service that helps maintainers reduce noisy triage work an
 - Action execution should retry on transient failures
 - If retries are exhausted, record failure details for audit/troubleshooting
 - Action failure must not block core webhook acceptance after event/alert persistence
+- Provide protected failure APIs:
+  - `GET /action-failures`
+  - `POST /action-failures/:id/retry`
+
+### FR-9 Observability APIs
+- Provide protected observability APIs:
+  - `GET /metrics/overview`
+  - `GET /metrics/timeseries`
+  - `GET /audit-logs`
+
+### FR-10 GitHub Source Event Pull (Protected)
+- Extend existing events API with GitHub source mode (no new endpoint path):
+  - `GET /events?source=github`
+    - fetch recent GitHub user events and return unique `event_types`
+  - `GET /events?source=github&sync=true`
+    - fetch recent GitHub user events and persist into `webhook_events`
+    - return sync summary (`saved`, `total`)
+- Must use configured `GITHUB_TOKEN` and reject when token/provider is unavailable.
+- Delivery id for synced GitHub events should be normalized as `gh-<github_event_id>` for idempotent upsert.
 
 ## 7. Non-Functional Requirements
 
 - **Security**: Reject unsigned/invalid webhooks; protected APIs require bearer JWT.
 - **Reliability**: Service should keep accepting events under normal failures with retry-ready design.
 - **Performance**: P95 webhook processing < 500ms (excluding DB outage).
-- **Observability**: Structured logs for webhook/auth/action paths.
+- **Observability**: Structured logs for webhook/auth/action/github-sync paths and metrics/audit querying APIs.
 - **Maintainability**: Clear package boundaries (`config`, `handlers`, `store`, `service`).
 
 ## 8. Acceptance Criteria (Definition of Done)
@@ -99,17 +130,21 @@ For current main-flow completion, all are required:
 2. Valid events are persisted in PostgreSQL.
 3. Invalid signatures return `401` and are not persisted.
 4. `POST /auth/login` returns JWT on valid credentials.
-5. Protected APIs (`/events`, `/alerts`, `/rules`) reject invalid/missing bearer token.
+5. Protected APIs (`/events`, `/alerts`, `/rules`, `/metrics/*`, `/audit-logs`, `/action-failures*`, `/config-*`) reject invalid/missing bearer token.
 6. Event list endpoint returns latest records with pagination/filter/total.
 7. Alerts list endpoint returns latest records with pagination/filter/total.
-8. Rules API supports list/create for active rule set.
+8. Rules API supports list/create and active status update (`PATCH /rules/:id/active`).
 9. Rule engine returns suggested actions for matched keywords.
 10. When `GITHUB_TOKEN` is set, suggested label/comment execution path is available.
-11. Action execution failures are retried and persisted when exhausted.
+11. Action execution failures are retried and persisted when exhausted; retry API available.
 12. Action failure does not prevent webhook success after core persistence.
-13. `go test ./...` and `go build ./...` pass.
-14. `npm run build` passes.
-15. README/docs include setup and run instructions.
+13. `GET /events?source=github` returns recent GitHub `event_types`.
+14. `GET /events?source=github&sync=true` persists pulled events into `webhook_events` idempotently.
+15. Observability endpoints provide overview/timeseries/audit data.
+16. Runtime config endpoints provide view/update/status capabilities.
+17. `go test ./...` and `go build ./...` pass.
+18. `npm run build` passes.
+19. README/docs include setup and run instructions.
 
 ## 9. Milestones
 
@@ -123,6 +158,7 @@ For current main-flow completion, all are required:
 - **M8**: Optional GitHub action execution (label/comment) (done)
 - **M9**: JWT login + protected API/UI routes (done)
 - **M10**: action retry + failure recording without blocking webhook core path (done)
+- **M11**: `/events` GitHub source mode + on-demand sync-to-DB (`source=github`, `sync=true`) (in progress)
 
 ## 10. Risks and Mitigations
 

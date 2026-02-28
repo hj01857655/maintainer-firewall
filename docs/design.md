@@ -11,6 +11,7 @@ This design covers M3, M4, M5-v1 and post-MVP hardening done in this branch:
 - M7: optional GitHub auto actions (label/comment) execution
 - M8: JWT login and protected API routes
 - M9: action retry + failure recording without blocking webhook acceptance
+- M11: extend existing `/events` with GitHub source pull and on-demand sync-to-DB (`source=github`, `sync=true`)
 
 ## 2. Runtime Components
 
@@ -19,9 +20,12 @@ This design covers M3, M4, M5-v1 and post-MVP hardening done in this branch:
 - `internal/config`
   - loads env-based runtime config
 - `internal/store`
-  - PostgreSQL connection and `webhook_events` persistence
+  - PostgreSQL/MySQL persistence for `webhook_events` and related tables
+- `internal/service/github_executor.go`
+  - GitHub API client for action execution and user-event pull
 - `internal/http/handlers`
   - request parsing, signature verification, event extraction, store call
+  - `/events` GitHub source mode + optional sync
 
 ## 3. Request/Data Flow
 
@@ -30,20 +34,22 @@ This design covers M3, M4, M5-v1 and post-MVP hardening done in this branch:
 3. GitHub sends `POST /webhook/github`
 4. Handler validates `X-Hub-Signature-256` with `GITHUB_WEBHOOK_SECRET`
 5. Handler extracts metadata from headers and JSON payload
-6. Handler writes event into PostgreSQL table `webhook_events`
+6. Handler writes event into table `webhook_events`
 7. Handler loads active rules from `webhook_rules` and evaluates suggestions
 8. Handler writes matched suggestions into `webhook_alerts`
 9. If configured, handler executes GitHub actions (`label`/`comment`) via GitHub API
 10. Action execution uses retry policy and records failures when retries are exhausted
 11. Webhook still returns success after core persistence path completes
-12. React console calls `GET /events` / `GET /alerts` / `GET /rules`
+12. `GET /events?source=github` pulls recent user events from GitHub and returns unique `event_types`
+13. `GET /events?source=github&sync=true` pulls recent user events and persists them into `webhook_events`
+14. React console calls `GET /events` / `GET /alerts` / `GET /rules`
 
 ## 4. Data Model
 
 Table: `webhook_events`
 
 - `id BIGSERIAL PRIMARY KEY`
-- `delivery_id TEXT NOT NULL UNIQUE`
+- `delivery_id TEXT NOT NULL UNIQUE` (webhook delivery id or normalized GitHub event id like `gh-<id>`)
 - `event_type TEXT NOT NULL`
 - `action TEXT NOT NULL`
 - `repository_full_name TEXT NOT NULL`
@@ -64,6 +70,7 @@ Indexes:
 - Bad body read / malformed JSON -> `400`
 - DB unavailable / insert failure -> `500`
 - Duplicate delivery id -> treated as success (`200`) for idempotency
+- `GET /events?source=github` provider/token issues -> `500/502` with clear message
 
 ## 6. Config
 

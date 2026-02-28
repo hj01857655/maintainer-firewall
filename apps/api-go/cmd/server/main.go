@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"maintainer-firewall/api-go/internal/config"
@@ -12,6 +13,7 @@ import (
 	"maintainer-firewall/api-go/internal/store"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func main() {
@@ -23,11 +25,25 @@ func main() {
 	}
 	defer eventStore.Close()
 
+	if cfg.BootstrapAdmin {
+		adminName := strings.TrimSpace(cfg.AdminUsername)
+		adminPass := strings.TrimSpace(cfg.AdminPassword)
+		if adminName != "" && adminPass != "" {
+			hash, hashErr := bcrypt.GenerateFromPassword([]byte(adminPass), bcrypt.DefaultCost)
+			if hashErr != nil {
+				log.Fatalf("failed to hash bootstrap admin password: %v", hashErr)
+			}
+			if err := eventStore.EnsureBootstrapAdminUser(context.Background(), adminName, string(hash)); err != nil {
+				log.Fatalf("failed to bootstrap admin user: %v", err)
+			}
+		}
+	}
+
 	webhookHandler := handlers.NewWebhookHandler(cfg.GitHubWebhookSecret, eventStore)
 	githubExecutor := service.NewGitHubActionExecutor(cfg.GitHubToken)
 	webhookHandler.ActionExecutor = githubExecutor
 	actionFailureRetryHandler := handlers.NewActionFailureRetryHandler(eventStore, githubExecutor)
-	eventsHandler := handlers.NewEventsHandler(eventStore)
+	eventsHandler := handlers.NewEventsHandler(eventStore, githubExecutor)
 	alertsHandler := handlers.NewAlertsHandler(eventStore)
 	rulesHandler := handlers.NewRulesHandler(eventStore)
 	observabilityHandler := handlers.NewObservabilityHandler(eventStore, handlers.RuntimeConfigStatus{
@@ -38,7 +54,7 @@ func main() {
 		AdminUsernameConfigured:       cfg.AdminUsername != "",
 		AdminPasswordConfigured:       cfg.AdminPassword != "",
 	})
-	authHandler := handlers.NewAuthHandler(cfg.AdminUsername, cfg.AdminPassword, cfg.JWTSecret, 24*time.Hour)
+	authHandler := handlers.NewAuthHandlerWithStore(eventStore, cfg.AdminUsername, cfg.AdminPassword, cfg.JWTSecret, 24*time.Hour, cfg.AuthEnvFallback)
 
 	r := gin.Default()
 

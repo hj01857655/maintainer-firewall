@@ -3,23 +3,27 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"maintainer-firewall/api-go/internal/service"
 	"maintainer-firewall/api-go/internal/store"
 
 	"github.com/gin-gonic/gin"
 )
 
 type mockEventsStore struct {
-	items      []store.WebhookEventRecord
-	total      int64
-	lastLimit  int
-	lastOffset int
-	lastType   string
-	lastAction string
+	items       []store.WebhookEventRecord
+	total       int64
+	lastLimit   int
+	lastOffset  int
+	lastType    string
+	lastAction  string
+	savedEvents []store.WebhookEvent
+	saveErr     error
 }
 
 func (m *mockEventsStore) ListEvents(_ context.Context, limit int, offset int, eventType string, action string) ([]store.WebhookEventRecord, int64, error) {
@@ -28,6 +32,37 @@ func (m *mockEventsStore) ListEvents(_ context.Context, limit int, offset int, e
 	m.lastType = eventType
 	m.lastAction = action
 	return m.items, m.total, nil
+}
+
+func (m *mockEventsStore) SaveEvent(_ context.Context, evt store.WebhookEvent) error {
+	if m.saveErr != nil {
+		return m.saveErr
+	}
+	m.savedEvents = append(m.savedEvents, evt)
+	return nil
+}
+
+type mockGitHubEventTypesProvider struct {
+	items  []string
+	events []service.GitHubUserEvent
+	err    error
+	calls  int
+}
+
+func (m *mockGitHubEventTypesProvider) ListRecentEventTypes(_ context.Context) ([]string, error) {
+	m.calls++
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.items, nil
+}
+
+func (m *mockGitHubEventTypesProvider) ListRecentEvents(_ context.Context) ([]service.GitHubUserEvent, error) {
+	m.calls++
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.events, nil
 }
 
 func TestEventsList_WithFiltersAndTotal(t *testing.T) {
@@ -49,7 +84,7 @@ func TestEventsList_WithFiltersAndTotal(t *testing.T) {
 		total: 33,
 	}
 
-	h := NewEventsHandler(mockStore)
+	h := NewEventsHandler(mockStore, nil)
 	r := gin.New()
 	r.GET("/events", h.List)
 
@@ -91,7 +126,7 @@ func TestEventsList_InvalidLimitOffsetFallback(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	mockStore := &mockEventsStore{items: []store.WebhookEventRecord{}, total: 0}
-	h := NewEventsHandler(mockStore)
+	h := NewEventsHandler(mockStore, nil)
 	r := gin.New()
 	r.GET("/events", h.List)
 
@@ -108,5 +143,132 @@ func TestEventsList_InvalidLimitOffsetFallback(t *testing.T) {
 	}
 	if mockStore.lastOffset != 0 {
 		t.Fatalf("expected sanitized offset=0, got %d", mockStore.lastOffset)
+	}
+}
+
+func TestEventsList_SourceGitHub_Success(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	mockStore := &mockEventsStore{}
+	githubProvider := &mockGitHubEventTypesProvider{items: []string{"CreateEvent", "IssuesEvent"}}
+	h := NewEventsHandler(mockStore, githubProvider)
+	r := gin.New()
+	r.GET("/events", h.List)
+
+	req := httptest.NewRequest(http.MethodGet, "/events?source=github", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", w.Code, w.Body.String())
+	}
+	if githubProvider.calls != 1 {
+		t.Fatalf("expected github provider called once, got %d", githubProvider.calls)
+	}
+	if mockStore.lastLimit != 0 {
+		t.Fatalf("expected db store not called, lastLimit=%d", mockStore.lastLimit)
+	}
+
+	var resp struct {
+		OK         bool     `json:"ok"`
+		Source     string   `json:"source"`
+		EventTypes []string `json:"event_types"`
+		Total      int      `json:"total"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if !resp.OK || resp.Source != "github" || resp.Total != 2 || len(resp.EventTypes) != 2 {
+		t.Fatalf("unexpected response: %s", w.Body.String())
+	}
+}
+
+func TestEventsList_SourceGitHub_NotConfigured(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	h := NewEventsHandler(&mockEventsStore{}, nil)
+	r := gin.New()
+	r.GET("/events", h.List)
+
+	req := httptest.NewRequest(http.MethodGet, "/events?source=github", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500, got %d, body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestEventsList_SourceGitHub_ProviderError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	githubProvider := &mockGitHubEventTypesProvider{err: errors.New("github api status: 401")}
+	h := NewEventsHandler(&mockEventsStore{}, githubProvider)
+	r := gin.New()
+	r.GET("/events", h.List)
+
+	req := httptest.NewRequest(http.MethodGet, "/events?source=github", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("expected status 502, got %d, body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestEventsList_SourceGitHub_SyncTrue_SavesEvents(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	mockStore := &mockEventsStore{}
+	githubProvider := &mockGitHubEventTypesProvider{events: []service.GitHubUserEvent{{
+		DeliveryID:         "gh-1001",
+		EventType:          "IssuesEvent",
+		Action:             "opened",
+		RepositoryFullName: "owner/repo",
+		SenderLogin:        "alice",
+		PayloadJSON:        []byte(`{"action":"opened"}`),
+	}}}
+	h := NewEventsHandler(mockStore, githubProvider)
+	r := gin.New()
+	r.GET("/events", h.List)
+
+	req := httptest.NewRequest(http.MethodGet, "/events?source=github&sync=true", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", w.Code, w.Body.String())
+	}
+	if len(mockStore.savedEvents) != 1 {
+		t.Fatalf("expected 1 saved event, got %d", len(mockStore.savedEvents))
+	}
+	if mockStore.savedEvents[0].DeliveryID != "gh-1001" {
+		t.Fatalf("unexpected saved event: %+v", mockStore.savedEvents[0])
+	}
+
+	var resp struct {
+		OK    bool `json:"ok"`
+		Sync  bool `json:"sync"`
+		Saved int  `json:"saved"`
+		Total int  `json:"total"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if !resp.OK || !resp.Sync || resp.Saved != 1 || resp.Total != 1 {
+		t.Fatalf("unexpected response: %s", w.Body.String())
+	}
+}
+
+func TestEventsList_SourceGitHub_SyncTrue_StoreNotConfigured(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	githubProvider := &mockGitHubEventTypesProvider{events: []service.GitHubUserEvent{}}
+	h := NewEventsHandler(nil, githubProvider)
+	r := gin.New()
+	r.GET("/events", h.List)
+
+	req := httptest.NewRequest(http.MethodGet, "/events?source=github&sync=true", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500, got %d, body=%s", w.Code, w.Body.String())
 	}
 }
