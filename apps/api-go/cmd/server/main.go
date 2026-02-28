@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"maintainer-firewall/api-go/internal/config"
 	"maintainer-firewall/api-go/internal/http/handlers"
@@ -27,7 +28,7 @@ func main() {
 	eventsHandler := handlers.NewEventsHandler(eventStore)
 	alertsHandler := handlers.NewAlertsHandler(eventStore)
 	rulesHandler := handlers.NewRulesHandler(eventStore)
-	authHandler := handlers.NewAuthHandler(cfg.AdminUsername, cfg.AdminPassword, cfg.AccessToken)
+	authHandler := handlers.NewAuthHandler(cfg.AdminUsername, cfg.AdminPassword, cfg.JWTSecret, 24*time.Hour)
 
 	r := gin.Default()
 	r.GET("/health", handlers.Health)
@@ -35,7 +36,7 @@ func main() {
 	r.POST("/webhook/github", webhookHandler.GitHub)
 
 	api := r.Group("/")
-	api.Use(handlers.AuthMiddleware(cfg.AccessToken))
+	api.Use(handlers.AuthMiddleware(cfg.JWTSecret))
 	api.GET("/events", eventsHandler.List)
 	api.GET("/alerts", alertsHandler.List)
 	api.GET("/rules", rulesHandler.List)

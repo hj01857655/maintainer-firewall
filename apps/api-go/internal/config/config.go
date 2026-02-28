@@ -8,7 +8,7 @@ type Config struct {
 	GitHubToken         string
 	AdminUsername       string
 	AdminPassword       string
-	AccessToken         string
+	JWTSecret           string
 	DatabaseURL         string
 }
 
@@ -18,13 +18,18 @@ func Load() Config {
 		port = "8080"
 	}
 
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if jwtSecret == "" {
+		jwtSecret = os.Getenv("ACCESS_TOKEN")
+	}
+
 	return Config{
 		Port:                port,
 		GitHubWebhookSecret: os.Getenv("GITHUB_WEBHOOK_SECRET"),
 		GitHubToken:         os.Getenv("GITHUB_TOKEN"),
 		AdminUsername:       os.Getenv("ADMIN_USERNAME"),
 		AdminPassword:       os.Getenv("ADMIN_PASSWORD"),
-		AccessToken:         os.Getenv("ACCESS_TOKEN"),
+		JWTSecret:           jwtSecret,
 		DatabaseURL:         os.Getenv("DATABASE_URL"),
 	}
 }
