@@ -81,8 +81,14 @@ func AuthMiddleware(jwtSecret string) gin.HandlerFunc {
 			return []byte(secret), nil
 		})
 		if err != nil || parsed == nil || !parsed.Valid {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"ok": false, "message": "invalid token"})
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"ok": false, "message": "invalid bearer token"})
 			return
+		}
+
+		if claims, ok := parsed.Claims.(jwt.MapClaims); ok {
+			if sub, ok := claims["sub"].(string); ok {
+				c.Set("actor", strings.TrimSpace(sub))
+			}
 		}
 
 		c.Next()

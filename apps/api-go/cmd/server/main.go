@@ -24,10 +24,13 @@ func main() {
 	defer eventStore.Close()
 
 	webhookHandler := handlers.NewWebhookHandler(cfg.GitHubWebhookSecret, eventStore)
-	webhookHandler.ActionExecutor = service.NewGitHubActionExecutor(cfg.GitHubToken)
+	githubExecutor := service.NewGitHubActionExecutor(cfg.GitHubToken)
+	webhookHandler.ActionExecutor = githubExecutor
+	actionFailureRetryHandler := handlers.NewActionFailureRetryHandler(eventStore, githubExecutor)
 	eventsHandler := handlers.NewEventsHandler(eventStore)
 	alertsHandler := handlers.NewAlertsHandler(eventStore)
 	rulesHandler := handlers.NewRulesHandler(eventStore)
+	observabilityHandler := handlers.NewObservabilityHandler(eventStore)
 	authHandler := handlers.NewAuthHandler(cfg.AdminUsername, cfg.AdminPassword, cfg.JWTSecret, 24*time.Hour)
 
 	r := gin.Default()
@@ -41,6 +44,12 @@ func main() {
 	api.GET("/alerts", alertsHandler.List)
 	api.GET("/rules", rulesHandler.List)
 	api.POST("/rules", rulesHandler.Create)
+	api.PATCH("/rules/:id/active", rulesHandler.UpdateActive)
+	api.GET("/metrics/overview", observabilityHandler.MetricsOverview)
+	api.GET("/metrics/timeseries", observabilityHandler.MetricsTimeSeries)
+	api.GET("/action-failures", observabilityHandler.ActionFailures)
+	api.GET("/audit-logs", observabilityHandler.AuditLogs)
+	api.POST("/action-failures/:id/retry", actionFailureRetryHandler.Retry)
 
 	addr := fmt.Sprintf(":%s", cfg.Port)
 	if err := r.Run(addr); err != nil {

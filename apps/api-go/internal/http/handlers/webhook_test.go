@@ -18,18 +18,19 @@ import (
 )
 
 type mockWebhookStore struct {
-	saved            []store.WebhookEvent
-	savedAlerts      []store.AlertRecord
-	savedActionFails []store.ActionExecutionFailure
-	rules            []store.RuleRecord
+	saved             []store.WebhookEvent
+	savedAlerts       []store.AlertRecord
+	savedActionFails  []store.ActionExecutionFailure
+	savedDeliveryMets []store.DeliveryMetric
+	rules             []store.RuleRecord
 }
 
 type mockWebhookExecutor struct {
-	labels          []string
-	comments        []string
-	labelFailTimes  int
+	labels           []string
+	comments         []string
+	labelFailTimes   int
 	commentFailTimes int
-	labelCalls      int
+	labelCalls       int
 	commentCalls    int
 }
 
@@ -65,6 +66,11 @@ func (m *mockWebhookStore) SaveAlert(_ context.Context, alert store.AlertRecord)
 
 func (m *mockWebhookStore) SaveActionExecutionFailure(_ context.Context, item store.ActionExecutionFailure) error {
 	m.savedActionFails = append(m.savedActionFails, item)
+	return nil
+}
+
+func (m *mockWebhookStore) SaveDeliveryMetric(_ context.Context, metric store.DeliveryMetric) error {
+	m.savedDeliveryMets = append(m.savedDeliveryMets, metric)
 	return nil
 }
 

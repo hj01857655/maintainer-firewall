@@ -21,6 +21,7 @@ type WebhookEventSaver interface {
 	SaveEvent(ctx context.Context, evt store.WebhookEvent) error
 	SaveAlert(ctx context.Context, alert store.AlertRecord) error
 	SaveActionExecutionFailure(ctx context.Context, item store.ActionExecutionFailure) error
+	SaveDeliveryMetric(ctx context.Context, metric store.DeliveryMetric) error
 	ListRules(ctx context.Context, limit int, offset int, eventType string, keyword string, activeOnly bool) ([]store.RuleRecord, int64, error)
 }
 
@@ -52,6 +53,32 @@ func NewWebhookHandler(secret string, eventStore WebhookEventSaver) *WebhookHand
 }
 
 func (h *WebhookHandler) GitHub(c *gin.Context) {
+	startedAt := time.Now().UTC()
+	deliverySuccess := false
+
+	defer func() {
+		if h.Store == nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		deliveryID := c.GetHeader("X-GitHub-Delivery")
+		if strings.TrimSpace(deliveryID) == "" {
+			deliveryID = fmt.Sprintf("missing-%d", startedAt.UnixNano())
+		}
+		eventType := c.GetHeader("X-GitHub-Event")
+		if strings.TrimSpace(eventType) == "" {
+			eventType = "unknown"
+		}
+		_ = h.Store.SaveDeliveryMetric(ctx, store.DeliveryMetric{
+			EventType:     eventType,
+			DeliveryID:    deliveryID,
+			Success:       deliverySuccess,
+			ProcessingMS:  time.Since(startedAt).Milliseconds(),
+			RecordedAtUTC: time.Now().UTC(),
+		})
+	}()
+
 	if strings.TrimSpace(h.Secret) == "" {
 		c.JSON(500, webhookResponse{OK: false, Message: "GITHUB_WEBHOOK_SECRET is not configured"})
 		return
@@ -170,6 +197,7 @@ func (h *WebhookHandler) GitHub(c *gin.Context) {
 		}
 	}
 
+	deliverySuccess = true
 	c.JSON(200, webhookResponse{
 		OK:               true,
 		Message:          fmt.Sprintf("webhook accepted (action=%s)", action),

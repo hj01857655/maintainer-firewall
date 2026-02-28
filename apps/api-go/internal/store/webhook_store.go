@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	mysqlDriver "github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -71,11 +72,77 @@ type ActionExecutionFailure struct {
 	OccurredAt         time.Time `json:"occurred_at,omitempty"`
 }
 
-func NewWebhookEventStore(ctx context.Context, databaseURL string) (*WebhookEventStore, error) {
+type ActionExecutionFailureRecord struct {
+	ID int64 `json:"id"`
+	ActionExecutionFailure
+}
+
+type AuditLogRecord struct {
+	ID        int64     `json:"id"`
+	Actor     string    `json:"actor"`
+	Action    string    `json:"action"`
+	Target    string    `json:"target"`
+	TargetID  string    `json:"target_id"`
+	Payload   string    `json:"payload"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type DeliveryMetric struct {
+	EventType     string    `json:"event_type"`
+	DeliveryID    string    `json:"delivery_id"`
+	Success       bool      `json:"success"`
+	ProcessingMS  int64     `json:"processing_ms"`
+	RecordedAtUTC time.Time `json:"recorded_at_utc"`
+}
+
+type MetricsOverview struct {
+	Events24h       int64   `json:"events_24h"`
+	Alerts24h       int64   `json:"alerts_24h"`
+	Failures24h     int64   `json:"failures_24h"`
+	SuccessRate24h  float64 `json:"success_rate_24h"`
+	P95LatencyMS24h float64 `json:"p95_latency_ms_24h"`
+}
+
+type MetricsTimePoint struct {
+	BucketStart time.Time `json:"bucket_start"`
+	Events      int64     `json:"events"`
+	Alerts      int64     `json:"alerts"`
+	Failures    int64     `json:"failures"`
+}
+
+type WebhookStore interface {
+	Close()
+	SaveEvent(ctx context.Context, evt WebhookEvent) error
+	SaveAlert(ctx context.Context, alert AlertRecord) error
+	ListEvents(ctx context.Context, limit int, offset int, eventType string, action string) ([]WebhookEventRecord, int64, error)
+	ListAlerts(ctx context.Context, limit int, offset int, eventType string, action string, suggestionType string) ([]AlertRecord, int64, error)
+	ListRules(ctx context.Context, limit int, offset int, eventType string, keyword string, activeOnly bool) ([]RuleRecord, int64, error)
+	CreateRule(ctx context.Context, rule RuleRecord) (int64, error)
+	UpdateRuleActive(ctx context.Context, id int64, isActive bool) error
+	SaveActionExecutionFailure(ctx context.Context, item ActionExecutionFailure) error
+	ListActionExecutionFailures(ctx context.Context, limit int, offset int) ([]ActionExecutionFailureRecord, int64, error)
+	GetActionExecutionFailureByID(ctx context.Context, id int64) (ActionExecutionFailureRecord, error)
+	GetWebhookEventPayloadByDeliveryID(ctx context.Context, deliveryID string) (json.RawMessage, error)
+	SaveAuditLog(ctx context.Context, item AuditLogRecord) error
+	ListAuditLogs(ctx context.Context, limit int, offset int, actor string, action string) ([]AuditLogRecord, int64, error)
+	SaveDeliveryMetric(ctx context.Context, metric DeliveryMetric) error
+	GetMetricsOverview(ctx context.Context, since time.Time) (MetricsOverview, error)
+	GetMetricsTimeSeries(ctx context.Context, since time.Time, intervalMinutes int) ([]MetricsTimePoint, error)
+}
+
+func NewWebhookEventStore(ctx context.Context, databaseURL string) (WebhookStore, error) {
 	if strings.TrimSpace(databaseURL) == "" {
 		return nil, errors.New("DATABASE_URL is not configured")
 	}
 
+	if isMySQLDatabaseURL(databaseURL) {
+		return newMySQLWebhookEventStore(ctx, databaseURL)
+	}
+
+	return newPostgresWebhookEventStore(ctx, databaseURL)
+}
+
+func newPostgresWebhookEventStore(ctx context.Context, databaseURL string) (*WebhookEventStore, error) {
 	pool, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("create pgx pool: %w", err)
@@ -88,6 +155,11 @@ func NewWebhookEventStore(ctx context.Context, databaseURL string) (*WebhookEven
 	}
 
 	return store, nil
+}
+
+func isMySQLDatabaseURL(databaseURL string) bool {
+	u := strings.ToLower(strings.TrimSpace(databaseURL))
+	return strings.HasPrefix(u, "mysql://")
 }
 
 func (s *WebhookEventStore) Close() {
@@ -289,6 +361,21 @@ func (s *WebhookEventStore) CreateRule(ctx context.Context, rule RuleRecord) (in
 	return id, nil
 }
 
+func (s *WebhookEventStore) UpdateRuleActive(ctx context.Context, id int64, isActive bool) error {
+	result, err := s.pool.Exec(ctx, `
+		UPDATE webhook_rules
+		SET is_active = $2
+		WHERE id = $1
+	`, id, isActive)
+	if err != nil {
+		return fmt.Errorf("update webhook rule active: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("rule not found")
+	}
+	return nil
+}
+
 func (s *WebhookEventStore) SaveActionExecutionFailure(ctx context.Context, item ActionExecutionFailure) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO webhook_action_failures (
@@ -300,6 +387,223 @@ func (s *WebhookEventStore) SaveActionExecutionFailure(ctx context.Context, item
 		return fmt.Errorf("insert webhook action failure: %w", err)
 	}
 	return nil
+}
+
+func (s *WebhookEventStore) ListActionExecutionFailures(ctx context.Context, limit int, offset int) ([]ActionExecutionFailureRecord, int64, error) {
+	var total int64
+	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM webhook_action_failures`).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count action failures: %w", err)
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, delivery_id, event_type, action, repository_full_name, suggestion_type, suggestion_value, error_message, attempt_count, occurred_at
+		FROM webhook_action_failures
+		ORDER BY occurred_at DESC
+		LIMIT $1 OFFSET $2
+	`, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("query action failures: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]ActionExecutionFailureRecord, 0, limit)
+	for rows.Next() {
+		var rec ActionExecutionFailureRecord
+		if err := rows.Scan(&rec.ID, &rec.DeliveryID, &rec.EventType, &rec.Action, &rec.RepositoryFullName, &rec.SuggestionType, &rec.SuggestionValue, &rec.ErrorMessage, &rec.AttemptCount, &rec.OccurredAt); err != nil {
+			return nil, 0, fmt.Errorf("scan action failure: %w", err)
+		}
+		items = append(items, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate action failures: %w", err)
+	}
+	return items, total, nil
+}
+
+func (s *WebhookEventStore) GetActionExecutionFailureByID(ctx context.Context, id int64) (ActionExecutionFailureRecord, error) {
+	var rec ActionExecutionFailureRecord
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, delivery_id, event_type, action, repository_full_name, suggestion_type, suggestion_value, error_message, attempt_count, occurred_at
+		FROM webhook_action_failures
+		WHERE id = $1
+	`, id).Scan(&rec.ID, &rec.DeliveryID, &rec.EventType, &rec.Action, &rec.RepositoryFullName, &rec.SuggestionType, &rec.SuggestionValue, &rec.ErrorMessage, &rec.AttemptCount, &rec.OccurredAt)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "no rows") {
+			return rec, fmt.Errorf("action failure not found")
+		}
+		return rec, fmt.Errorf("get action failure by id: %w", err)
+	}
+	return rec, nil
+}
+
+func (s *WebhookEventStore) GetWebhookEventPayloadByDeliveryID(ctx context.Context, deliveryID string) (json.RawMessage, error) {
+	var payload []byte
+	err := s.pool.QueryRow(ctx, `SELECT payload_json FROM webhook_events WHERE delivery_id = $1`, strings.TrimSpace(deliveryID)).Scan(&payload)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "no rows") {
+			return nil, fmt.Errorf("webhook event not found")
+		}
+		return nil, fmt.Errorf("get webhook event payload by delivery id: %w", err)
+	}
+	return json.RawMessage(payload), nil
+}
+
+func (s *WebhookEventStore) SaveAuditLog(ctx context.Context, item AuditLogRecord) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO audit_logs (actor, action, target, target_id, payload)
+		VALUES ($1,$2,$3,$4,$5)
+	`, strings.TrimSpace(item.Actor), strings.TrimSpace(item.Action), strings.TrimSpace(item.Target), strings.TrimSpace(item.TargetID), item.Payload)
+	if err != nil {
+		return fmt.Errorf("insert audit log: %w", err)
+	}
+	return nil
+}
+
+func (s *WebhookEventStore) ListAuditLogs(ctx context.Context, limit int, offset int, actor string, action string) ([]AuditLogRecord, int64, error) {
+	ac := strings.TrimSpace(actor)
+	act := strings.TrimSpace(action)
+
+	var total int64
+	if err := s.pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM audit_logs
+		WHERE ($1 = '' OR actor = $1)
+		  AND ($2 = '' OR action = $2)
+	`, ac, act).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count audit logs: %w", err)
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, actor, action, target, target_id, payload, created_at
+		FROM audit_logs
+		WHERE ($1 = '' OR actor = $1)
+		  AND ($2 = '' OR action = $2)
+		ORDER BY created_at DESC
+		LIMIT $3 OFFSET $4
+	`, ac, act, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("query audit logs: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]AuditLogRecord, 0, limit)
+	for rows.Next() {
+		var rec AuditLogRecord
+		if err := rows.Scan(&rec.ID, &rec.Actor, &rec.Action, &rec.Target, &rec.TargetID, &rec.Payload, &rec.CreatedAt); err != nil {
+			return nil, 0, fmt.Errorf("scan audit log: %w", err)
+		}
+		items = append(items, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate audit logs: %w", err)
+	}
+	return items, total, nil
+}
+
+func (s *WebhookEventStore) SaveDeliveryMetric(ctx context.Context, metric DeliveryMetric) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO webhook_delivery_metrics (event_type, delivery_id, success, processing_ms, recorded_at)
+		VALUES ($1,$2,$3,$4,$5)
+	`, strings.TrimSpace(metric.EventType), strings.TrimSpace(metric.DeliveryID), metric.Success, metric.ProcessingMS, metric.RecordedAtUTC)
+	if err != nil {
+		return fmt.Errorf("insert delivery metric: %w", err)
+	}
+	return nil
+}
+
+func (s *WebhookEventStore) GetMetricsOverview(ctx context.Context, since time.Time) (MetricsOverview, error) {
+	var out MetricsOverview
+	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM webhook_events WHERE received_at >= $1`, since).Scan(&out.Events24h); err != nil {
+		return out, fmt.Errorf("count events metrics: %w", err)
+	}
+	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM webhook_alerts WHERE created_at >= $1`, since).Scan(&out.Alerts24h); err != nil {
+		return out, fmt.Errorf("count alerts metrics: %w", err)
+	}
+	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM webhook_action_failures WHERE occurred_at >= $1`, since).Scan(&out.Failures24h); err != nil {
+		return out, fmt.Errorf("count failures metrics: %w", err)
+	}
+
+	var total int64
+	var success int64
+	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*), COALESCE(SUM(CASE WHEN success THEN 1 ELSE 0 END),0) FROM webhook_delivery_metrics WHERE recorded_at >= $1`, since).Scan(&total, &success); err != nil {
+		return out, fmt.Errorf("count delivery metrics: %w", err)
+	}
+	if total > 0 {
+		out.SuccessRate24h = (float64(success) / float64(total)) * 100
+	}
+
+	rows, err := s.pool.Query(ctx, `SELECT processing_ms FROM webhook_delivery_metrics WHERE recorded_at >= $1 ORDER BY processing_ms ASC`, since)
+	if err != nil {
+		return out, fmt.Errorf("query latency metrics: %w", err)
+	}
+	defer rows.Close()
+	latencies := make([]int64, 0, 256)
+	for rows.Next() {
+		var v int64
+		if err := rows.Scan(&v); err != nil {
+			return out, fmt.Errorf("scan latency metric: %w", err)
+		}
+		latencies = append(latencies, v)
+	}
+	if err := rows.Err(); err != nil {
+		return out, fmt.Errorf("iterate latency metrics: %w", err)
+	}
+	if len(latencies) > 0 {
+		idx := int(float64(len(latencies)-1) * 0.95)
+		out.P95LatencyMS24h = float64(latencies[idx])
+	}
+	return out, nil
+}
+
+func (s *WebhookEventStore) GetMetricsTimeSeries(ctx context.Context, since time.Time, intervalMinutes int) ([]MetricsTimePoint, error) {
+	if intervalMinutes <= 0 {
+		intervalMinutes = 60
+	}
+	step := time.Duration(intervalMinutes) * time.Minute
+	start := since.UTC().Truncate(step)
+	now := time.Now().UTC()
+
+	buckets := make(map[time.Time]*MetricsTimePoint)
+	for t := start; !t.After(now); t = t.Add(step) {
+		tt := t
+		buckets[tt] = &MetricsTimePoint{BucketStart: tt}
+	}
+
+	fill := func(query string, assign func(*MetricsTimePoint, int64)) error {
+		rows, err := s.pool.Query(ctx, query, since)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var ts time.Time
+			if err := rows.Scan(&ts); err != nil {
+				return err
+			}
+			b := ts.UTC().Truncate(step)
+			if p, ok := buckets[b]; ok {
+				assign(p, 1)
+			}
+		}
+		return rows.Err()
+	}
+
+	if err := fill(`SELECT received_at FROM webhook_events WHERE received_at >= $1`, func(p *MetricsTimePoint, _ int64) { p.Events++ }); err != nil {
+		return nil, fmt.Errorf("fill events metrics timeseries: %w", err)
+	}
+	if err := fill(`SELECT created_at FROM webhook_alerts WHERE created_at >= $1`, func(p *MetricsTimePoint, _ int64) { p.Alerts++ }); err != nil {
+		return nil, fmt.Errorf("fill alerts metrics timeseries: %w", err)
+	}
+	if err := fill(`SELECT occurred_at FROM webhook_action_failures WHERE occurred_at >= $1`, func(p *MetricsTimePoint, _ int64) { p.Failures++ }); err != nil {
+		return nil, fmt.Errorf("fill failures metrics timeseries: %w", err)
+	}
+
+	out := make([]MetricsTimePoint, 0, len(buckets))
+	for t := start; !t.After(now); t = t.Add(step) {
+		if p, ok := buckets[t]; ok {
+			out = append(out, *p)
+		}
+	}
+	return out, nil
 }
 
 func (s *WebhookEventStore) ensureSchema(ctx context.Context) error {
@@ -454,6 +758,67 @@ func (s *WebhookEventStore) ensureSchema(ctx context.Context) error {
 		return fmt.Errorf("create idx_webhook_action_failures_delivery: %w", err)
 	}
 
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_webhook_action_failures_occurred_at
+		ON webhook_action_failures (occurred_at DESC)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_webhook_action_failures_occurred_at: %w", err)
+	}
+
+	_, err = s.pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS audit_logs (
+			id BIGSERIAL PRIMARY KEY,
+			actor TEXT NOT NULL,
+			action TEXT NOT NULL,
+			target TEXT NOT NULL,
+			target_id TEXT NOT NULL,
+			payload TEXT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("create audit_logs table: %w", err)
+	}
+
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at
+		ON audit_logs (created_at DESC)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_audit_logs_created_at: %w", err)
+	}
+
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_action
+		ON audit_logs (actor, action)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_audit_logs_actor_action: %w", err)
+	}
+
+	_, err = s.pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS webhook_delivery_metrics (
+			id BIGSERIAL PRIMARY KEY,
+			event_type TEXT NOT NULL,
+			delivery_id TEXT NOT NULL,
+			success BOOLEAN NOT NULL,
+			processing_ms BIGINT NOT NULL,
+			recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("create webhook_delivery_metrics table: %w", err)
+	}
+
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_webhook_delivery_metrics_recorded_at
+		ON webhook_delivery_metrics (recorded_at DESC)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_webhook_delivery_metrics_recorded_at: %w", err)
+	}
+
 	return nil
 }
 
@@ -462,5 +827,11 @@ func IsDuplicateKeyError(err error) bool {
 	if errors.As(err, &pgErr) {
 		return pgErr.Code == "23505"
 	}
+
+	var mysqlErr *mysqlDriver.MySQLError
+	if errors.As(err, &mysqlErr) {
+		return mysqlErr.Number == 1062
+	}
+
 	return false
 }

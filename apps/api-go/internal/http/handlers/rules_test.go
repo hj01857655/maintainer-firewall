@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,15 +16,18 @@ import (
 )
 
 type mockRulesStore struct {
-	items      []store.RuleRecord
-	total      int64
-	createdID  int64
-	created    []store.RuleRecord
-	lastLimit  int
-	lastOffset int
-	lastEvent  string
-	lastKey    string
-	lastActive bool
+	items            []store.RuleRecord
+	total            int64
+	createdID        int64
+	created          []store.RuleRecord
+	lastLimit        int
+	lastOffset       int
+	lastEvent        string
+	lastKey          string
+	lastActive       bool
+	updatedID        int64
+	updatedIsActive  bool
+	updateShouldFail bool
 }
 
 func (m *mockRulesStore) ListRules(_ context.Context, limit int, offset int, eventType string, keyword string, activeOnly bool) ([]store.RuleRecord, int64, error) {
@@ -41,6 +45,22 @@ func (m *mockRulesStore) CreateRule(_ context.Context, rule store.RuleRecord) (i
 		m.createdID = 1
 	}
 	return m.createdID, nil
+}
+
+func (m *mockRulesStore) UpdateRuleActive(_ context.Context, id int64, isActive bool) error {
+	if m.updateShouldFail {
+		return fmt.Errorf("db failure")
+	}
+	if id == 404 {
+		return fmt.Errorf("rule not found")
+	}
+	m.updatedID = id
+	m.updatedIsActive = isActive
+	return nil
+}
+
+func (m *mockRulesStore) SaveAuditLog(_ context.Context, _ store.AuditLogRecord) error {
+	return nil
 }
 
 func TestRulesList_WithFilters(t *testing.T) {
@@ -109,6 +129,60 @@ func TestRulesCreate_BadRequest(t *testing.T) {
 	r.POST("/rules", h.Create)
 
 	req := httptest.NewRequest(http.MethodPost, "/rules", strings.NewReader(`{"event_type":"issues"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d, body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestRulesUpdateActive_Success(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	mockStore := &mockRulesStore{}
+	h := NewRulesHandler(mockStore)
+	r := gin.New()
+	r.PATCH("/rules/:id/active", h.UpdateActive)
+
+	req := httptest.NewRequest(http.MethodPatch, "/rules/7/active", strings.NewReader(`{"is_active":false}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", w.Code, w.Body.String())
+	}
+	if mockStore.updatedID != 7 || mockStore.updatedIsActive {
+		t.Fatalf("unexpected update args: id=%d is_active=%v", mockStore.updatedID, mockStore.updatedIsActive)
+	}
+}
+
+func TestRulesUpdateActive_NotFound(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	mockStore := &mockRulesStore{}
+	h := NewRulesHandler(mockStore)
+	r := gin.New()
+	r.PATCH("/rules/:id/active", h.UpdateActive)
+
+	req := httptest.NewRequest(http.MethodPatch, "/rules/404/active", strings.NewReader(`{"is_active":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d, body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestRulesUpdateActive_BadRequest(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	mockStore := &mockRulesStore{}
+	h := NewRulesHandler(mockStore)
+	r := gin.New()
+	r.PATCH("/rules/:id/active", h.UpdateActive)
+
+	req := httptest.NewRequest(http.MethodPatch, "/rules/invalid/active", strings.NewReader(`{"is_active":true}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
