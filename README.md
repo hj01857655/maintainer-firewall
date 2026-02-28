@@ -17,6 +17,10 @@ Before starting API, set required environment variables:
 ```powershell
 # e:\VSCodeSpace\reverse\maintainer-firewall\apps\api-go
 $env:GITHUB_WEBHOOK_SECRET="replace_with_webhook_secret"
+$env:GITHUB_TOKEN="optional_github_pat_for_auto_actions"
+$env:ADMIN_USERNAME="admin"
+$env:ADMIN_PASSWORD="admin123"
+$env:ACCESS_TOKEN="mf-demo-token"
 $env:DATABASE_URL="postgres://postgres:postgres@localhost:5432/maintainer_firewall?sslmode=disable"
 go mod tidy
 go run .\cmd\server\main.go
@@ -25,10 +29,12 @@ go run .\cmd\server\main.go
 API endpoints:
 
 - `GET http://localhost:8080/health`
-- `GET http://localhost:8080/events?limit=20&offset=0&event_type=issues&action=opened`
+- `POST http://localhost:8080/auth/login`
+- `GET http://localhost:8080/events?limit=20&offset=0&event_type=issues&action=opened` (auth required)
   - response includes `total` for pagination
-- `GET http://localhost:8080/alerts?limit=20&offset=0&event_type=issues&action=opened&suggestion_type=label`
+- `GET http://localhost:8080/alerts?limit=20&offset=0&event_type=issues&action=opened&suggestion_type=label` (auth required)
   - response includes `total` for pagination
+- `GET/POST http://localhost:8080/rules` (auth required)
 - `POST http://localhost:8080/webhook/github`
 
 ## Run Web
@@ -42,7 +48,7 @@ npm run dev
 Web app:
 
 - `http://localhost:5173`
-- automatically proxies `/health` / `/events` / `/alerts` to `http://localhost:8080`
+- automatically proxies `/health` / `/auth` / `/events` / `/alerts` / `/rules` to `http://localhost:8080`
 
 ## Docs
 
@@ -50,31 +56,34 @@ Web app:
 - Design: `docs/design.md`
 - Handover: `docs/handover.md`
 
-## Quick API check (main flow)
+## 3-minute demo (recommended)
 
 ```powershell
-# health
-Invoke-RestMethod http://localhost:8080/health
+# e:\VSCodeSpace\reverse\maintainer-firewall
+.\scripts\demo.ps1
+```
 
-# 1) send webhook (replace secret/signature/payload as needed)
-$secret = "replace_with_webhook_secret"
-$body = '{"action":"opened","repository":{"full_name":"owner/repo"},"sender":{"login":"alice"},"issue":{"title":"urgent duplicate bug"}}'
-$hmac = New-Object System.Security.Cryptography.HMACSHA256
-$hmac.Key = [Text.Encoding]::UTF8.GetBytes($secret)
-$hashBytes = $hmac.ComputeHash([Text.Encoding]::UTF8.GetBytes($body))
-$signature = "sha256=" + ([BitConverter]::ToString($hashBytes).Replace("-","").ToLower())
+Script does:
 
-Invoke-RestMethod -Method Post `
-  -Uri http://localhost:8080/webhook/github `
-  -Headers @{ "X-Hub-Signature-256"=$signature; "X-GitHub-Event"="issues"; "X-GitHub-Delivery"="demo-delivery-1" } `
-  -Body $body `
-  -ContentType "application/json"
+- set env vars
+- start API in background
+- login and get token
+- create demo rule
+- send signed webhook
+- query events/alerts and print summary
 
-# 2) list events
-Invoke-RestMethod "http://localhost:8080/events?limit=20&offset=0&event_type=issues&action=opened"
+## Quick API check (manual)
 
-# 3) list alerts
-Invoke-RestMethod "http://localhost:8080/alerts?limit=20&offset=0&event_type=issues&action=opened&suggestion_type=label"
+```powershell
+# login
+$login = Invoke-RestMethod -Method Post -Uri http://localhost:8080/auth/login -ContentType "application/json" -Body '{"username":"admin","password":"admin123"}'
+$headers = @{ Authorization = "Bearer $($login.token)" }
+
+# list events (auth required)
+Invoke-RestMethod "http://localhost:8080/events?limit=20&offset=0&event_type=issues&action=opened" -Headers $headers
+
+# list alerts (auth required)
+Invoke-RestMethod "http://localhost:8080/alerts?limit=20&offset=0&event_type=issues&action=opened&suggestion_type=label" -Headers $headers
 ```
 
 ## CI
@@ -88,6 +97,9 @@ Invoke-RestMethod "http://localhost:8080/alerts?limit=20&offset=0&event_type=iss
 - Persist webhook events
 - Rule suggestion generation (`label` / `comment`)
 - Persist rule-hit alerts
+- Configurable rules API (`GET/POST /rules`)
+- Auto execute GitHub actions (label/comment)
+- Login + protected API/UI routes
 - Query events with pagination/filter + `total`
 - Query alerts with pagination/filter + `total`
 - Web pages for events/alerts
