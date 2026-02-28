@@ -4,7 +4,7 @@
 
 - GitHub: https://github.com/hj01857655/maintainer-firewall
 - Branch: `main`
-- Local path: `e:\VSCodeSpace\reverse\maintainer-firewall`
+- Local path: `<repo-root>/maintainer-firewall`
 
 ## Current Tech Stack (V1)
 
@@ -93,12 +93,12 @@ maintainer-firewall/
 ### 1) API
 
 ```powershell
-# e:\VSCodeSpace\reverse\maintainer-firewall\apps\api-go
+# <repo-root>/apps/api-go
 $env:GITHUB_WEBHOOK_SECRET="replace_with_webhook_secret"
 $env:GITHUB_TOKEN="optional_github_pat_for_auto_actions"
 $env:ADMIN_USERNAME="admin"
-$env:ADMIN_PASSWORD="admin123"
-$env:JWT_SECRET="mf-demo-jwt-secret"
+$env:ADMIN_PASSWORD="CHANGE_ME_ADMIN_PASSWORD"
+$env:JWT_SECRET="CHANGE_ME_JWT_SECRET"
 $env:DATABASE_URL="postgres://postgres:postgres@localhost:5432/maintainer_firewall?sslmode=disable"
 go run .\cmd\server\main.go
 ```
@@ -106,7 +106,7 @@ go run .\cmd\server\main.go
 ### 2) Web
 
 ```powershell
-# e:\VSCodeSpace\reverse\maintainer-firewall\apps\web-react
+# <repo-root>/apps/web-react
 npm install
 npm run dev
 ```
@@ -134,7 +134,7 @@ Web app:
 
 ## Reopen IDE Quick Resume Checklist
 
-1. Open folder: `e:\VSCodeSpace\reverse\maintainer-firewall`
+1. Open folder: `<repo-root>/maintainer-firewall`
 2. Run `go test ./...` in `apps/api-go`
 3. Run `npm run build` in `apps/web-react`
 4. Run one-command demo from repo root: `./scripts/demo.ps1`

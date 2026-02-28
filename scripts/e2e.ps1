@@ -1,10 +1,10 @@
 param(
   [string]$AdminUsername = "admin",
-  [string]$AdminPassword = "admin123",
-  [string]$JWTSecret = "mf-e2e-jwt-secret",
-  [string]$GitHubWebhookSecret = "mf-e2e-webhook-secret",
+  [string]$AdminPassword = "CHANGE_ME_ADMIN_PASSWORD",
+  [string]$JWTSecret = "CHANGE_ME_JWT_SECRET",
+  [string]$GitHubWebhookSecret = "CHANGE_ME_WEBHOOK_SECRET",
   [string]$GitHubToken = "",
-  [string]$DatabaseURL = "postgres://postgres:postgres@localhost:5432/maintainer_firewall?sslmode=disable",
+  [string]$DatabaseURL = "postgres://<user>:<password>@localhost:5432/maintainer_firewall?sslmode=disable",
   [int]$ApiPort = 8080,
   [switch]$KeepApiRunning
 )
@@ -35,6 +35,9 @@ Write-Host "[E2E 2/8] Start API..." -ForegroundColor Cyan
 $apiProc = Start-Process -FilePath "powershell" -ArgumentList "-NoProfile -Command go run .\cmd\server\main.go" -PassThru
 
 
+if ($AdminPassword -like 'CHANGE_ME*' -or $JWTSecret -like 'CHANGE_ME*' -or $GitHubWebhookSecret -like 'CHANGE_ME*') {
+  throw 'Please provide real secrets via parameters: -AdminPassword -JWTSecret -GitHubWebhookSecret'
+}
 $cleanupNeeded = -not $KeepApiRunning
 try {
 Write-Host "[E2E 3/8] Wait health..." -ForegroundColor Cyan

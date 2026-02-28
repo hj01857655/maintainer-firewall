@@ -15,12 +15,12 @@ Current status: webhook signature verification + PostgreSQL event persistence + 
 Before starting API, set required environment variables:
 
 ```powershell
-# e:\VSCodeSpace\reverse\maintainer-firewall\apps\api-go
+# <repo-root>/apps/api-go
 $env:GITHUB_WEBHOOK_SECRET="replace_with_webhook_secret"
 $env:GITHUB_TOKEN="optional_github_pat_for_auto_actions"
 $env:ADMIN_USERNAME="admin"
-$env:ADMIN_PASSWORD="admin123"
-$env:JWT_SECRET="mf-demo-jwt-secret"
+$env:ADMIN_PASSWORD="CHANGE_ME_ADMIN_PASSWORD"
+$env:JWT_SECRET="CHANGE_ME_JWT_SECRET"
 # backward-compat fallback if JWT_SECRET is empty:
 # $env:ACCESS_TOKEN="legacy-shared-secret"
 $env:DATABASE_URL="postgres://postgres:postgres@localhost:5432/maintainer_firewall?sslmode=disable"
@@ -42,7 +42,7 @@ API endpoints:
 ## Run Web
 
 ```powershell
-# e:\VSCodeSpace\reverse\maintainer-firewall\apps\web-react
+# <repo-root>/apps/web-react
 npm install
 npm run dev
 ```
@@ -61,14 +61,14 @@ Web app:
 ## 3-minute demo (recommended)
 
 ```powershell
-# e:\VSCodeSpace\reverse\maintainer-firewall
+# <repo-root>
 .\scripts\demo.ps1
 ```
 
 Script does:
 
 - set env vars (including auth secret)
-- start API in background
+
 - login and get JWT token
 - create demo rule
 - send signed webhook
@@ -77,7 +77,7 @@ Script does:
 ## E2E acceptance (automated)
 
 ```powershell
-# e:\VSCodeSpace\reverse\maintainer-firewall
+# <repo-root>
 .\scripts\e2e.ps1
 ```
 
@@ -85,7 +85,7 @@ What it verifies automatically:
 
 - health endpoint is up
 - login returns JWT
-- protected rule create works
+
 - signed webhook accepted
 - events/alerts contain the new delivery_id
 - alerts include expected suggestion value
@@ -94,7 +94,8 @@ What it verifies automatically:
 
 ```powershell
 # login (returns JWT)
-$login = Invoke-RestMethod -Method Post -Uri http://localhost:8080/auth/login -ContentType "application/json" -Body '{"username":"admin","password":"admin123"}'
+$loginBody = @{ username = "admin"; password = "<YOUR_ADMIN_PASSWORD>" } | ConvertTo-Json
+$login = Invoke-RestMethod -Method Post -Uri http://localhost:8080/auth/login -ContentType "application/json" -Body $loginBody
 $headers = @{ Authorization = "Bearer $($login.token)" }
 
 # list events (auth required)

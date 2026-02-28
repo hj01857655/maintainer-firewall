@@ -1,10 +1,10 @@
 param(
   [string]$AdminUsername = "admin",
-  [string]$AdminPassword = "admin123",
-  [string]$AccessToken = "mf-demo-token",
-  [string]$GitHubWebhookSecret = "mf-demo-webhook-secret",
+  [string]$AdminPassword = "CHANGE_ME_ADMIN_PASSWORD",
+  [string]$AccessToken = "CHANGE_ME_LEGACY_ACCESS_TOKEN",
+  [string]$GitHubWebhookSecret = "CHANGE_ME_WEBHOOK_SECRET",
   [string]$GitHubToken = "",
-  [string]$DatabaseURL = "postgres://postgres:postgres@localhost:5432/maintainer_firewall?sslmode=disable",
+  [string]$DatabaseURL = "postgres://<user>:<password>@localhost:5432/maintainer_firewall?sslmode=disable",
   [int]$ApiPort = 8080,
   [int]$WebPort = 5173
 )
@@ -44,6 +44,9 @@ for ($i = 0; $i -lt 40; $i++) {
 }
 
 Write-Host "[4/7] Login and get access token..." -ForegroundColor Cyan
+if ($AdminPassword -like 'CHANGE_ME*' -or $GitHubWebhookSecret -like 'CHANGE_ME*') {
+  throw 'Please provide real secrets via parameters: -AdminPassword and -GitHubWebhookSecret'
+}
 $loginResp = Invoke-RestMethod -Method Post -Uri "http://localhost:$ApiPort/auth/login" -ContentType "application/json" -Body (@{
   username = $AdminUsername
   password = $AdminPassword
