@@ -12,6 +12,10 @@ export default defineConfig({
       '/events': {
         target: 'http://localhost:8080',
         changeOrigin: true
+      },
+      '/alerts': {
+        target: 'http://localhost:8080',
+        changeOrigin: true
       }
     }
   }

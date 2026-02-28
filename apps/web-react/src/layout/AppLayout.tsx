@@ -13,6 +13,7 @@ export function AppLayout({ children }: Props) {
         <nav style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
           <NavItem to="/dashboard" label="Dashboard" />
           <NavItem to="/events" label="Events" />
+          <NavItem to="/alerts" label="Alerts" />
         </nav>
       </aside>
 
