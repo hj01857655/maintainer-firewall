@@ -35,6 +35,19 @@ type WebhookEventRecord struct {
 	ReceivedAt         time.Time `json:"received_at"`
 }
 
+type AlertRecord struct {
+	DeliveryID         string    `json:"delivery_id"`
+	EventType          string    `json:"event_type"`
+	Action             string    `json:"action"`
+	RepositoryFullName string    `json:"repository_full_name"`
+	SenderLogin        string    `json:"sender_login"`
+	RuleMatched        string    `json:"rule_matched"`
+	SuggestionType     string    `json:"suggestion_type"`
+	SuggestionValue    string    `json:"suggestion_value"`
+	Reason             string    `json:"reason"`
+	CreatedAt          time.Time `json:"created_at,omitempty"`
+}
+
 func NewWebhookEventStore(ctx context.Context, databaseURL string) (*WebhookEventStore, error) {
 	if strings.TrimSpace(databaseURL) == "" {
 		return nil, errors.New("DATABASE_URL is not configured")
@@ -70,6 +83,20 @@ func (s *WebhookEventStore) SaveEvent(ctx context.Context, evt WebhookEvent) err
 	`, evt.DeliveryID, evt.EventType, evt.Action, evt.RepositoryFullName, evt.SenderLogin, evt.PayloadJSON)
 	if err != nil {
 		return fmt.Errorf("insert webhook event: %w", err)
+	}
+	return nil
+}
+
+func (s *WebhookEventStore) SaveAlert(ctx context.Context, alert AlertRecord) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO webhook_alerts (
+			delivery_id, event_type, action, repository_full_name,
+			sender_login, rule_matched, suggestion_type, suggestion_value, reason
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		ON CONFLICT (delivery_id, suggestion_type, suggestion_value, rule_matched) DO NOTHING
+	`, alert.DeliveryID, alert.EventType, alert.Action, alert.RepositoryFullName, alert.SenderLogin, alert.RuleMatched, alert.SuggestionType, alert.SuggestionValue, alert.Reason)
+	if err != nil {
+		return fmt.Errorf("insert webhook alert: %w", err)
 	}
 	return nil
 }
@@ -172,6 +199,42 @@ func (s *WebhookEventStore) ensureSchema(ctx context.Context) error {
 	`)
 	if err != nil {
 		return fmt.Errorf("create idx_webhook_events_event_action: %w", err)
+	}
+
+	_, err = s.pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS webhook_alerts (
+			id BIGSERIAL PRIMARY KEY,
+			delivery_id TEXT NOT NULL,
+			event_type TEXT NOT NULL,
+			action TEXT NOT NULL,
+			repository_full_name TEXT NOT NULL,
+			sender_login TEXT NOT NULL,
+			rule_matched TEXT NOT NULL,
+			suggestion_type TEXT NOT NULL,
+			suggestion_value TEXT NOT NULL,
+			reason TEXT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			UNIQUE (delivery_id, suggestion_type, suggestion_value, rule_matched)
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("create webhook_alerts table: %w", err)
+	}
+
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_webhook_alerts_created_at
+		ON webhook_alerts (created_at DESC)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_webhook_alerts_created_at: %w", err)
+	}
+
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_webhook_alerts_event_action
+		ON webhook_alerts (event_type, action)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_webhook_alerts_event_action: %w", err)
 	}
 
 	return nil

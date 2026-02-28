@@ -19,6 +19,7 @@ import (
 
 type WebhookEventSaver interface {
 	SaveEvent(ctx context.Context, evt store.WebhookEvent) error
+	SaveAlert(ctx context.Context, alert store.AlertRecord) error
 }
 
 type WebhookHandler struct {
@@ -105,6 +106,24 @@ func (h *WebhookHandler) GitHub(c *gin.Context) {
 	suggestions := []service.SuggestedAction{}
 	if h.RuleEngine != nil {
 		suggestions = h.RuleEngine.Evaluate(eventType, payload)
+	}
+
+	for _, s := range suggestions {
+		alert := store.AlertRecord{
+			DeliveryID:         deliveryID,
+			EventType:          eventType,
+			Action:             action,
+			RepositoryFullName: evt.RepositoryFullName,
+			SenderLogin:        evt.SenderLogin,
+			RuleMatched:        s.Matched,
+			SuggestionType:     s.Type,
+			SuggestionValue:    s.Value,
+			Reason:             s.Reason,
+		}
+		if err := h.Store.SaveAlert(ctx, alert); err != nil {
+			c.JSON(500, webhookResponse{OK: false, Message: fmt.Sprintf("failed to persist alert: %v", err)})
+			return
+		}
 	}
 
 	c.JSON(200, webhookResponse{

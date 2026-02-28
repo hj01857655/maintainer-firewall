@@ -17,11 +17,17 @@ import (
 )
 
 type mockWebhookStore struct {
-	saved []store.WebhookEvent
+	saved       []store.WebhookEvent
+	savedAlerts []store.AlertRecord
 }
 
 func (m *mockWebhookStore) SaveEvent(_ context.Context, evt store.WebhookEvent) error {
 	m.saved = append(m.saved, evt)
+	return nil
+}
+
+func (m *mockWebhookStore) SaveAlert(_ context.Context, alert store.AlertRecord) error {
+	m.savedAlerts = append(m.savedAlerts, alert)
 	return nil
 }
 
@@ -66,6 +72,12 @@ func TestWebhookGitHub_SignatureValid(t *testing.T) {
 	}
 	if _, exists := resp["suggested_actions"]; !exists {
 		t.Fatalf("expected suggested_actions in response, body=%s", w.Body.String())
+	}
+	if len(mockStore.savedAlerts) == 0 {
+		t.Fatalf("expected at least 1 alert record to be saved")
+	}
+	if mockStore.savedAlerts[0].EventType != "issues" || mockStore.savedAlerts[0].Action != "opened" {
+		t.Fatalf("unexpected alert event/action: %+v", mockStore.savedAlerts[0])
 	}
 }
 
