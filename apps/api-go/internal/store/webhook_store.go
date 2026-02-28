@@ -152,6 +152,64 @@ func (s *WebhookEventStore) ListEvents(ctx context.Context, limit int, offset in
 	return items, total, nil
 }
 
+func (s *WebhookEventStore) ListAlerts(ctx context.Context, limit int, offset int, eventType string, action string, suggestionType string) ([]AlertRecord, int64, error) {
+	et := strings.TrimSpace(eventType)
+	ac := strings.TrimSpace(action)
+	st := strings.TrimSpace(suggestionType)
+
+	var total int64
+	if err := s.pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM webhook_alerts
+		WHERE ($1 = '' OR event_type = $1)
+		  AND ($2 = '' OR action = $2)
+		  AND ($3 = '' OR suggestion_type = $3)
+	`, et, ac, st).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count webhook alerts: %w", err)
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT delivery_id, event_type, action, repository_full_name, sender_login,
+		       rule_matched, suggestion_type, suggestion_value, reason, created_at
+		FROM webhook_alerts
+		WHERE ($1 = '' OR event_type = $1)
+		  AND ($2 = '' OR action = $2)
+		  AND ($3 = '' OR suggestion_type = $3)
+		ORDER BY created_at DESC
+		LIMIT $4 OFFSET $5
+	`, et, ac, st, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("query webhook alerts: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]AlertRecord, 0, limit)
+	for rows.Next() {
+		var item AlertRecord
+		if err := rows.Scan(
+			&item.DeliveryID,
+			&item.EventType,
+			&item.Action,
+			&item.RepositoryFullName,
+			&item.SenderLogin,
+			&item.RuleMatched,
+			&item.SuggestionType,
+			&item.SuggestionValue,
+			&item.Reason,
+			&item.CreatedAt,
+		); err != nil {
+			return nil, 0, fmt.Errorf("scan webhook alert: %w", err)
+		}
+		items = append(items, item)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate webhook alerts: %w", err)
+	}
+
+	return items, total, nil
+}
+
 func (s *WebhookEventStore) ensureSchema(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS webhook_events (
@@ -235,6 +293,14 @@ func (s *WebhookEventStore) ensureSchema(ctx context.Context) error {
 	`)
 	if err != nil {
 		return fmt.Errorf("create idx_webhook_alerts_event_action: %w", err)
+	}
+
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_webhook_alerts_suggestion_type
+		ON webhook_alerts (suggestion_type)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_webhook_alerts_suggestion_type: %w", err)
 	}
 
 	return nil
