@@ -32,3 +32,6 @@ apps/web-react/*.tsbuildinfo
 
 # Build artifacts
 coverage/
+
+# Breezell local workspace config
+.breezell/

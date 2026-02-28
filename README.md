@@ -2,11 +2,11 @@
 
 Go + React open-source project skeleton for maintainer workflow automation.
 
-Current status: webhook signature verification + PostgreSQL event persistence + rule suggestion + alerts persistence + configurable rules + auto action execution + JWT-protected API/UI + action retry/failure recording + E2E acceptance script are implemented.
+Current status: webhook signature verification + DB event persistence (PostgreSQL/MySQL) + rule suggestion + alerts persistence + configurable rules + auto action execution + JWT-protected API/UI + action retry/failure recording + E2E acceptance script are implemented.
 
 ## Structure
 
-- `apps/api-go`: Go API service (Gin + PostgreSQL event/alert store)
+- `apps/api-go`: Go API service (Gin + PostgreSQL/MySQL event/alert store)
 - `apps/web-react`: React console (Vite + TS + React Router, dashboard + events + alerts pages)
 - `docs`: architecture/docs (requirements/design/handover)
 
@@ -23,7 +23,10 @@ $env:ADMIN_PASSWORD="CHANGE_ME_ADMIN_PASSWORD"
 $env:JWT_SECRET="CHANGE_ME_JWT_SECRET"
 # backward-compat fallback if JWT_SECRET is empty:
 # $env:ACCESS_TOKEN="legacy-shared-secret"
+# PostgreSQL example
 $env:DATABASE_URL="postgres://postgres:postgres@localhost:5432/maintainer_firewall?sslmode=disable"
+# MySQL example
+# $env:DATABASE_URL="mysql://<MYSQL_USER>:<MYSQL_PASSWORD>@127.0.0.1:3306/maintainer_firewall"
 go mod tidy
 go run .\cmd\server\main.go
 ```
@@ -77,18 +80,31 @@ Script does:
 ## E2E acceptance (automated)
 
 ```powershell
-# <repo-root>
-.\scripts\e2e.ps1
+# <repo-root> (PostgreSQL example)
+.\scripts\e2e.ps1 `
+  -AdminUsername "admin" `
+  -AdminPassword "<YOUR_ADMIN_PASSWORD>" `
+  -JWTSecret "<YOUR_JWT_SECRET>" `
+  -GitHubWebhookSecret "<YOUR_WEBHOOK_SECRET>" `
+  -DatabaseURL "postgres://postgres:postgres@localhost:5432/maintainer_firewall?sslmode=disable"
+
+# <repo-root> (MySQL example)
+# .\scripts\e2e.ps1 `
+#   -AdminUsername "admin" `
+#   -AdminPassword "<YOUR_ADMIN_PASSWORD>" `
+#   -JWTSecret "<YOUR_JWT_SECRET>" `
+#   -GitHubWebhookSecret "<YOUR_WEBHOOK_SECRET>" `
+#   -DatabaseURL "mysql://<MYSQL_USER>:<MYSQL_PASSWORD>@127.0.0.1:3306/maintainer_firewall"
 ```
 
 What it verifies automatically:
 
 - health endpoint is up
 - login returns JWT
-
 - signed webhook accepted
 - events/alerts contain the new delivery_id
 - alerts include expected suggestion value
+- works with either PostgreSQL or MySQL via `-DatabaseURL`
 
 ## Quick API check (manual)
 

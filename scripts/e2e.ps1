@@ -6,7 +6,10 @@ param(
   [string]$GitHubToken = "",
   [string]$DatabaseURL = "postgres://<user>:<password>@localhost:5432/maintainer_firewall?sslmode=disable",
   [int]$ApiPort = 8080,
-  [switch]$KeepApiRunning
+  [int]$WebPort = 5173,
+  [switch]$StartWeb,
+  [switch]$KeepApiRunning,
+  [switch]$KeepWebRunning
 )
 
 $ErrorActionPreference = "Stop"
@@ -20,9 +23,11 @@ function Assert-True {
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $apiDir = Join-Path $repoRoot "apps\api-go"
+$webDir = Join-Path $repoRoot "apps\web-react"
 
 Write-Host "[E2E 1/8] Set environment variables..." -ForegroundColor Cyan
 
+$env:ADMIN_USERNAME = $AdminUsername
 $env:ADMIN_PASSWORD = $AdminPassword
 $env:JWT_SECRET = $JWTSecret
 $env:GITHUB_WEBHOOK_SECRET = $GitHubWebhookSecret
@@ -32,15 +37,33 @@ $env:PORT = "$ApiPort"
 
 Write-Host "[E2E 2/8] Start API..." -ForegroundColor Cyan
 
-$apiProc = Start-Process -FilePath "powershell" -ArgumentList "-NoProfile -Command go run .\cmd\server\main.go" -PassThru
+$apiProc = Start-Process -FilePath "powershell" -ArgumentList "-NoProfile -Command go run .\cmd\server\main.go" -WorkingDirectory $apiDir -PassThru
+
+$webProc = $null
+if ($StartWeb) {
+  Write-Host "[E2E 2.5/8] Start Web..." -ForegroundColor Cyan
+  $webProc = Start-Process -FilePath "powershell" -ArgumentList "-NoProfile -Command npm exec vite -- --port=$WebPort" -WorkingDirectory $webDir -PassThru
+}
 
 
 if ($AdminPassword -like 'CHANGE_ME*' -or $JWTSecret -like 'CHANGE_ME*' -or $GitHubWebhookSecret -like 'CHANGE_ME*') {
   throw 'Please provide real secrets via parameters: -AdminPassword -JWTSecret -GitHubWebhookSecret'
 }
-$cleanupNeeded = -not $KeepApiRunning
+if ([string]::IsNullOrWhiteSpace($AdminUsername)) {
+  throw 'Please provide -AdminUsername'
+}
+if ($DatabaseURL -like 'postgres://<user>:<password>*') {
+  throw 'Please provide real PostgreSQL URL via -DatabaseURL'
+}
+if ($DatabaseURL -like 'mysql://<*') {
+  throw 'Please provide real MySQL URL via -DatabaseURL'
+}
+$cleanupApi = -not $KeepApiRunning
+$cleanupWeb = $StartWeb -and (-not $KeepWebRunning)
+$apiHealthUrl = "http://localhost:$ApiPort/health"
+$webHealthUrl = "http://localhost:$WebPort/login"
 try {
-Write-Host "[E2E 3/8] Wait health..." -ForegroundColor Cyan
+Write-Host "[E2E 3/8] Wait API health..." -ForegroundColor Cyan
 
   for ($i = 0; $i -lt 60; $i++) {
     try {
@@ -53,7 +76,22 @@ Write-Host "[E2E 3/8] Wait health..." -ForegroundColor Cyan
     if ($i -eq 59) { throw "API did not become healthy in time" }
   }
 
-Write-Host "[E2E 4/8] Login..." -ForegroundColor Cyan
+if ($StartWeb) {
+    Write-Host "[E2E 3.5/8] Wait Web ready (port=$WebPort)..." -ForegroundColor Cyan
+    for ($i = 0; $i -lt 60; $i++) {
+      try {
+        $resp = Invoke-WebRequest -Method Get -Uri $webHealthUrl -TimeoutSec 2 -UseBasicParsing
+        if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 500) { break }
+      } catch {
+        Start-Sleep -Milliseconds 500
+      }
+      if ($i -eq 59) { throw "Web did not become ready in time" }
+    }
+    Write-Host "Web ready: http://localhost:$WebPort/login" -ForegroundColor Green
+    Write-Host "Default test account: $AdminUsername / (password from -AdminPassword)" -ForegroundColor DarkGray
+  }
+
+Write-Host "[E2E 4/8] Login... (username=$AdminUsername)" -ForegroundColor Cyan
   $loginBody = @{ username = $AdminUsername; password = $AdminPassword } | ConvertTo-Json
   $login = Invoke-RestMethod -Method Post -Uri "http://localhost:$ApiPort/auth/login" -ContentType "application/json" -Body $loginBody
 
@@ -116,8 +154,12 @@ Write-Host "[E2E 4/8] Login..." -ForegroundColor Cyan
   Write-Host ("events.total={0}, alerts.total={1}" -f $events.total, $alerts.total)
 }
 finally {
-  if ($cleanupNeeded -and $null -ne $apiProc -and -not $apiProc.HasExited) {
-
+  if ($cleanupApi -and $null -ne $apiProc -and -not $apiProc.HasExited) {
+    Stop-Process -Id $apiProc.Id -Force
     Write-Host "API process stopped: $($apiProc.Id)" -ForegroundColor Yellow
+  }
+  if ($cleanupWeb -and $null -ne $webProc -and -not $webProc.HasExited) {
+    Stop-Process -Id $webProc.Id -Force
+    Write-Host "Web process stopped: $($webProc.Id)" -ForegroundColor Yellow
   }
 }
