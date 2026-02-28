@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -8,12 +9,20 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
+
+	"maintainer-firewall/api-go/internal/store"
 
 	"github.com/gin-gonic/gin"
 )
 
+type WebhookEventSaver interface {
+	SaveEvent(ctx context.Context, evt store.WebhookEvent) error
+}
+
 type WebhookHandler struct {
 	Secret string
+	Store  WebhookEventSaver
 }
 
 type webhookResponse struct {
@@ -22,17 +31,17 @@ type webhookResponse struct {
 	Event   string `json:"event,omitempty"`
 }
 
-type githubWebhookPayload struct {
-	Action string `json:"action"`
-}
-
-func NewWebhookHandler(secret string) *WebhookHandler {
-	return &WebhookHandler{Secret: secret}
+func NewWebhookHandler(secret string, eventStore WebhookEventSaver) *WebhookHandler {
+	return &WebhookHandler{Secret: secret, Store: eventStore}
 }
 
 func (h *WebhookHandler) GitHub(c *gin.Context) {
 	if strings.TrimSpace(h.Secret) == "" {
 		c.JSON(500, webhookResponse{OK: false, Message: "GITHUB_WEBHOOK_SECRET is not configured"})
+		return
+	}
+	if h.Store == nil {
+		c.JSON(500, webhookResponse{OK: false, Message: "event store is not configured"})
 		return
 	}
 
@@ -53,19 +62,68 @@ func (h *WebhookHandler) GitHub(c *gin.Context) {
 		return
 	}
 
-	event := c.GetHeader("X-GitHub-Event")
-	if event == "" {
-		event = "unknown"
+	eventType := c.GetHeader("X-GitHub-Event")
+	if eventType == "" {
+		eventType = "unknown"
+	}
+	deliveryID := c.GetHeader("X-GitHub-Delivery")
+	if strings.TrimSpace(deliveryID) == "" {
+		deliveryID = fmt.Sprintf("missing-%d", time.Now().UnixNano())
 	}
 
-	var payload githubWebhookPayload
-	_ = json.Unmarshal(body, &payload)
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		c.JSON(400, webhookResponse{OK: false, Message: "invalid JSON payload"})
+		return
+	}
+
+	action, _ := payload["action"].(string)
+	evt := store.WebhookEvent{
+		DeliveryID:         deliveryID,
+		EventType:          eventType,
+		Action:             action,
+		RepositoryFullName: extractRepositoryFullName(payload),
+		SenderLogin:        extractSenderLogin(payload),
+		PayloadJSON:        body,
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+	defer cancel()
+
+	if err := h.Store.SaveEvent(ctx, evt); err != nil {
+		c.JSON(500, webhookResponse{OK: false, Message: fmt.Sprintf("failed to persist event: %v", err)})
+		return
+	}
 
 	c.JSON(200, webhookResponse{
 		OK:      true,
-		Message: fmt.Sprintf("webhook accepted (action=%s)", payload.Action),
-		Event:   event,
+		Message: fmt.Sprintf("webhook accepted (action=%s)", action),
+		Event:   eventType,
 	})
+}
+
+func extractRepositoryFullName(payload map[string]any) string {
+	repo, ok := payload["repository"].(map[string]any)
+	if !ok {
+		return "unknown"
+	}
+	fullName, _ := repo["full_name"].(string)
+	if strings.TrimSpace(fullName) == "" {
+		return "unknown"
+	}
+	return fullName
+}
+
+func extractSenderLogin(payload map[string]any) string {
+	sender, ok := payload["sender"].(map[string]any)
+	if !ok {
+		return "unknown"
+	}
+	login, _ := sender["login"].(string)
+	if strings.TrimSpace(login) == "" {
+		return "unknown"
+	}
+	return login
 }
 
 func verifyGitHubSignature(signatureHeader string, body []byte, secret string) bool {

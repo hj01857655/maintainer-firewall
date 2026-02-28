@@ -3,8 +3,9 @@ package config
 import "os"
 
 type Config struct {
-	Port              string
+	Port                string
 	GitHubWebhookSecret string
+	DatabaseURL         string
 }
 
 func Load() Config {
@@ -16,5 +17,6 @@ func Load() Config {
 	return Config{
 		Port:                port,
 		GitHubWebhookSecret: os.Getenv("GITHUB_WEBHOOK_SECRET"),
+		DatabaseURL:         os.Getenv("DATABASE_URL"),
 	}
 }
