@@ -48,6 +48,17 @@ type AlertRecord struct {
 	CreatedAt          time.Time `json:"created_at,omitempty"`
 }
 
+type RuleRecord struct {
+	ID              int64     `json:"id"`
+	EventType       string    `json:"event_type"`
+	Keyword         string    `json:"keyword"`
+	SuggestionType  string    `json:"suggestion_type"`
+	SuggestionValue string    `json:"suggestion_value"`
+	Reason          string    `json:"reason"`
+	IsActive        bool      `json:"is_active"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
 func NewWebhookEventStore(ctx context.Context, databaseURL string) (*WebhookEventStore, error) {
 	if strings.TrimSpace(databaseURL) == "" {
 		return nil, errors.New("DATABASE_URL is not configured")
@@ -210,6 +221,62 @@ func (s *WebhookEventStore) ListAlerts(ctx context.Context, limit int, offset in
 	return items, total, nil
 }
 
+func (s *WebhookEventStore) ListRules(ctx context.Context, limit int, offset int, eventType string, keyword string, activeOnly bool) ([]RuleRecord, int64, error) {
+	et := strings.TrimSpace(eventType)
+	kw := strings.TrimSpace(keyword)
+
+	var total int64
+	if err := s.pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM webhook_rules
+		WHERE ($1 = '' OR event_type = $1)
+		  AND ($2 = '' OR keyword ILIKE '%' || $2 || '%')
+		  AND (NOT $3 OR is_active = true)
+	`, et, kw, activeOnly).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count webhook rules: %w", err)
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, event_type, keyword, suggestion_type, suggestion_value, reason, is_active, created_at
+		FROM webhook_rules
+		WHERE ($1 = '' OR event_type = $1)
+		  AND ($2 = '' OR keyword ILIKE '%' || $2 || '%')
+		  AND (NOT $3 OR is_active = true)
+		ORDER BY created_at DESC
+		LIMIT $4 OFFSET $5
+	`, et, kw, activeOnly, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("query webhook rules: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]RuleRecord, 0, limit)
+	for rows.Next() {
+		var item RuleRecord
+		if err := rows.Scan(&item.ID, &item.EventType, &item.Keyword, &item.SuggestionType, &item.SuggestionValue, &item.Reason, &item.IsActive, &item.CreatedAt); err != nil {
+			return nil, 0, fmt.Errorf("scan webhook rule: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate webhook rules: %w", err)
+	}
+	return items, total, nil
+}
+
+func (s *WebhookEventStore) CreateRule(ctx context.Context, rule RuleRecord) (int64, error) {
+	var id int64
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO webhook_rules (event_type, keyword, suggestion_type, suggestion_value, reason, is_active)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id
+	`, strings.TrimSpace(rule.EventType), strings.TrimSpace(rule.Keyword), strings.TrimSpace(rule.SuggestionType), strings.TrimSpace(rule.SuggestionValue), strings.TrimSpace(rule.Reason), rule.IsActive).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("insert webhook rule: %w", err)
+	}
+	return id, nil
+}
+
 func (s *WebhookEventStore) ensureSchema(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS webhook_events (
@@ -301,6 +368,39 @@ func (s *WebhookEventStore) ensureSchema(ctx context.Context) error {
 	`)
 	if err != nil {
 		return fmt.Errorf("create idx_webhook_alerts_suggestion_type: %w", err)
+	}
+
+	_, err = s.pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS webhook_rules (
+			id BIGSERIAL PRIMARY KEY,
+			event_type TEXT NOT NULL,
+			keyword TEXT NOT NULL,
+			suggestion_type TEXT NOT NULL,
+			suggestion_value TEXT NOT NULL,
+			reason TEXT NOT NULL,
+			is_active BOOLEAN NOT NULL DEFAULT true,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			UNIQUE (event_type, keyword, suggestion_type, suggestion_value)
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("create webhook_rules table: %w", err)
+	}
+
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_webhook_rules_event_type
+		ON webhook_rules (event_type)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_webhook_rules_event_type: %w", err)
+	}
+
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_webhook_rules_active
+		ON webhook_rules (is_active)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_webhook_rules_active: %w", err)
 	}
 
 	return nil

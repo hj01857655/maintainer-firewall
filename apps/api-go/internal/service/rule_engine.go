@@ -9,6 +9,14 @@ type SuggestedAction struct {
 	Matched string `json:"matched"`
 }
 
+type RuleDefinition struct {
+	EventType       string
+	Keyword         string
+	SuggestionType  string
+	SuggestionValue string
+	Reason          string
+}
+
 type RuleEngine struct {
 }
 
@@ -17,6 +25,10 @@ func NewRuleEngine() *RuleEngine {
 }
 
 func (e *RuleEngine) Evaluate(eventType string, payload map[string]any) []SuggestedAction {
+	return e.EvaluateWithRules(eventType, payload, defaultRules())
+}
+
+func (e *RuleEngine) EvaluateWithRules(eventType string, payload map[string]any, rules []RuleDefinition) []SuggestedAction {
 	if eventType != "issues" && eventType != "pull_request" {
 		return nil
 	}
@@ -26,43 +38,43 @@ func (e *RuleEngine) Evaluate(eventType string, payload map[string]any) []Sugges
 		return nil
 	}
 
-	rules := []struct {
-		keyword string
-		label   string
-		reply   string
-		reason  string
-	}{
-		{
-			keyword: "duplicate",
-			label:   "needs-triage",
-			reply:   "Thanks! This may be a duplicate. Please reference related issue links.",
-			reason:  "contains duplicate keyword",
-		},
-		{
-			keyword: "help wanted",
-			label:   "help-wanted",
-			reply:   "Maintainers marked this as help wanted candidate.",
-			reason:  "contains help wanted keyword",
-		},
-		{
-			keyword: "urgent",
-			label:   "priority-high",
-			reply:   "Marked for fast triage due to urgency signal.",
-			reason:  "contains urgent keyword",
-		},
-	}
-
 	result := make([]SuggestedAction, 0, 4)
 	for _, rule := range rules {
-		if strings.Contains(text, rule.keyword) {
-			result = append(result,
-				SuggestedAction{Type: "label", Value: rule.label, Reason: rule.reason, Matched: rule.keyword},
-				SuggestedAction{Type: "comment", Value: rule.reply, Reason: rule.reason, Matched: rule.keyword},
-			)
+		if strings.TrimSpace(rule.Keyword) == "" {
+			continue
+		}
+		if rule.EventType != "" && rule.EventType != eventType {
+			continue
+		}
+		keyword := strings.ToLower(rule.Keyword)
+		if strings.Contains(text, keyword) {
+			result = append(result, SuggestedAction{
+				Type:    rule.SuggestionType,
+				Value:   rule.SuggestionValue,
+				Reason:  rule.Reason,
+				Matched: rule.Keyword,
+			})
 		}
 	}
 
 	return dedupeActions(result)
+}
+
+func defaultRules() []RuleDefinition {
+	return []RuleDefinition{
+		{EventType: "issues", Keyword: "duplicate", SuggestionType: "label", SuggestionValue: "needs-triage", Reason: "contains duplicate keyword"},
+		{EventType: "issues", Keyword: "duplicate", SuggestionType: "comment", SuggestionValue: "Thanks! This may be a duplicate. Please reference related issue links.", Reason: "contains duplicate keyword"},
+		{EventType: "issues", Keyword: "help wanted", SuggestionType: "label", SuggestionValue: "help-wanted", Reason: "contains help wanted keyword"},
+		{EventType: "issues", Keyword: "help wanted", SuggestionType: "comment", SuggestionValue: "Maintainers marked this as help wanted candidate.", Reason: "contains help wanted keyword"},
+		{EventType: "issues", Keyword: "urgent", SuggestionType: "label", SuggestionValue: "priority-high", Reason: "contains urgent keyword"},
+		{EventType: "issues", Keyword: "urgent", SuggestionType: "comment", SuggestionValue: "Marked for fast triage due to urgency signal.", Reason: "contains urgent keyword"},
+		{EventType: "pull_request", Keyword: "duplicate", SuggestionType: "label", SuggestionValue: "needs-triage", Reason: "contains duplicate keyword"},
+		{EventType: "pull_request", Keyword: "duplicate", SuggestionType: "comment", SuggestionValue: "Thanks! This may be a duplicate. Please reference related PR links.", Reason: "contains duplicate keyword"},
+		{EventType: "pull_request", Keyword: "help wanted", SuggestionType: "label", SuggestionValue: "help-wanted", Reason: "contains help wanted keyword"},
+		{EventType: "pull_request", Keyword: "help wanted", SuggestionType: "comment", SuggestionValue: "Maintainers marked this as help wanted candidate.", Reason: "contains help wanted keyword"},
+		{EventType: "pull_request", Keyword: "urgent", SuggestionType: "label", SuggestionValue: "priority-high", Reason: "contains urgent keyword"},
+		{EventType: "pull_request", Keyword: "urgent", SuggestionType: "comment", SuggestionValue: "Marked for fast triage due to urgency signal.", Reason: "contains urgent keyword"},
+	}
 }
 
 func extractText(payload map[string]any) string {
@@ -96,7 +108,7 @@ func dedupeActions(in []SuggestedAction) []SuggestedAction {
 	seen := map[string]struct{}{}
 	out := make([]SuggestedAction, 0, len(in))
 	for _, a := range in {
-		key := a.Type + "|" + a.Value
+		key := a.Type + "|" + a.Value + "|" + a.Matched
 		if _, ok := seen[key]; ok {
 			continue
 		}

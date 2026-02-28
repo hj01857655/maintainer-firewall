@@ -20,6 +20,7 @@ import (
 type WebhookEventSaver interface {
 	SaveEvent(ctx context.Context, evt store.WebhookEvent) error
 	SaveAlert(ctx context.Context, alert store.AlertRecord) error
+	ListRules(ctx context.Context, limit int, offset int, eventType string, keyword string, activeOnly bool) ([]store.RuleRecord, int64, error)
 }
 
 type WebhookHandler struct {
@@ -105,7 +106,26 @@ func (h *WebhookHandler) GitHub(c *gin.Context) {
 
 	suggestions := []service.SuggestedAction{}
 	if h.RuleEngine != nil {
-		suggestions = h.RuleEngine.Evaluate(eventType, payload)
+		rules, _, err := h.Store.ListRules(ctx, 200, 0, eventType, "", true)
+		if err != nil {
+			c.JSON(500, webhookResponse{OK: false, Message: fmt.Sprintf("failed to load rules: %v", err)})
+			return
+		}
+		if len(rules) > 0 {
+			defs := make([]service.RuleDefinition, 0, len(rules))
+			for _, r := range rules {
+				defs = append(defs, service.RuleDefinition{
+					EventType:       r.EventType,
+					Keyword:         r.Keyword,
+					SuggestionType:  r.SuggestionType,
+					SuggestionValue: r.SuggestionValue,
+					Reason:          r.Reason,
+				})
+			}
+			suggestions = h.RuleEngine.EvaluateWithRules(eventType, payload, defs)
+		} else {
+			suggestions = h.RuleEngine.Evaluate(eventType, payload)
+		}
 	}
 
 	for _, s := range suggestions {

@@ -24,11 +24,14 @@ func main() {
 	webhookHandler := handlers.NewWebhookHandler(cfg.GitHubWebhookSecret, eventStore)
 	eventsHandler := handlers.NewEventsHandler(eventStore)
 	alertsHandler := handlers.NewAlertsHandler(eventStore)
+	rulesHandler := handlers.NewRulesHandler(eventStore)
 
 	r := gin.Default()
 	r.GET("/health", handlers.Health)
 	r.GET("/events", eventsHandler.List)
 	r.GET("/alerts", alertsHandler.List)
+	r.GET("/rules", rulesHandler.List)
+	r.POST("/rules", rulesHandler.Create)
 	r.POST("/webhook/github", webhookHandler.GitHub)
 
 	addr := fmt.Sprintf(":%s", cfg.Port)

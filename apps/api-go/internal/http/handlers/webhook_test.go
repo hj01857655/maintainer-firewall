@@ -19,6 +19,7 @@ import (
 type mockWebhookStore struct {
 	saved       []store.WebhookEvent
 	savedAlerts []store.AlertRecord
+	rules       []store.RuleRecord
 }
 
 func (m *mockWebhookStore) SaveEvent(_ context.Context, evt store.WebhookEvent) error {
@@ -29,6 +30,10 @@ func (m *mockWebhookStore) SaveEvent(_ context.Context, evt store.WebhookEvent) 
 func (m *mockWebhookStore) SaveAlert(_ context.Context, alert store.AlertRecord) error {
 	m.savedAlerts = append(m.savedAlerts, alert)
 	return nil
+}
+
+func (m *mockWebhookStore) ListRules(_ context.Context, _ int, _ int, _ string, _ string, _ bool) ([]store.RuleRecord, int64, error) {
+	return m.rules, int64(len(m.rules)), nil
 }
 
 func TestWebhookGitHub_SignatureValid(t *testing.T) {
@@ -44,7 +49,11 @@ func TestWebhookGitHub_SignatureValid(t *testing.T) {
 	body, _ := json.Marshal(payload)
 	signature := signBody(secret, body)
 
-	mockStore := &mockWebhookStore{}
+	mockStore := &mockWebhookStore{
+		rules: []store.RuleRecord{
+			{EventType: "issues", Keyword: "urgent", SuggestionType: "label", SuggestionValue: "P0", Reason: "urgent rule"},
+		},
+	}
 	h := NewWebhookHandler(secret, mockStore)
 
 	r := gin.New()
@@ -78,6 +87,9 @@ func TestWebhookGitHub_SignatureValid(t *testing.T) {
 	}
 	if mockStore.savedAlerts[0].EventType != "issues" || mockStore.savedAlerts[0].Action != "opened" {
 		t.Fatalf("unexpected alert event/action: %+v", mockStore.savedAlerts[0])
+	}
+	if mockStore.savedAlerts[0].SuggestionValue != "P0" {
+		t.Fatalf("expected rule suggestion value P0, got %s", mockStore.savedAlerts[0].SuggestionValue)
 	}
 }
 
