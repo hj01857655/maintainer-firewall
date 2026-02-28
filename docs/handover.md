@@ -8,28 +8,42 @@
 
 ## Current Tech Stack (V1)
 
-- Backend: Go 1.23 + Gin
-- Frontend: React + TypeScript + Vite
+- Backend: Go + Gin + PostgreSQL (pgx)
+- Frontend: React + TypeScript + Vite + React Router
+- Auth: JWT bearer auth for protected APIs/UI
 - Package manager: npm
 - Runtime targets: local dev first, Docker later
 
-## What is already done
+## What is already done (current main)
 
 1. Monorepo skeleton created
    - `apps/api-go`
    - `apps/web-react`
    - `infra/docker`
    - `docs`
-2. Go API bootstrap
+2. Core backend APIs
    - `GET /health`
-   - env config loader (`PORT`, default 8080)
-3. React bootstrap
-   - app renders and fetches `/health`
-   - Vite proxy routes `/health` to `http://localhost:8080`
-4. Git initialized, first commit done, pushed to GitHub
-5. `.gitignore` added for Go/Node/IDE/build artifacts
+   - `POST /webhook/github` (HMAC signature verification)
+   - `GET /events` (protected, pagination/filter/total)
+   - `GET /alerts` (protected, pagination/filter/total)
+   - `GET /rules`, `POST /rules` (protected)
+   - `POST /auth/login` (JWT issue)
+3. Data persistence
+   - `webhook_events`
+   - `webhook_alerts`
+   - `webhook_rules`
+4. Rule engine + automation
+   - DB-backed rule matching
+   - Suggested actions (`label` / `comment`)
+   - optional GitHub auto action execution via `GITHUB_TOKEN`
+5. Frontend pages
+   - login/dashboard/events/alerts
+   - protected route guard using bearer token
+6. CI and docs
+   - GitHub Actions for Go/Web build
+   - README + requirements + design aligned to current flow
 
-## Project Structure
+## Project Structure (key files)
 
 ```text
 maintainer-firewall/
@@ -37,20 +51,36 @@ maintainer-firewall/
 │  ├─ api-go/
 │  │  ├─ cmd/server/main.go
 │  │  ├─ internal/config/config.go
-│  │  ├─ internal/http/handlers/health.go
+│  │  ├─ internal/http/handlers/
+│  │  │  ├─ health.go
+│  │  │  ├─ auth.go
+│  │  │  ├─ webhook.go
+│  │  │  ├─ events.go
+│  │  │  ├─ alerts.go
+│  │  │  └─ rules.go
+│  │  ├─ internal/store/webhook_store.go
+│  │  ├─ internal/service/
+│  │  │  ├─ rule_engine.go
+│  │  │  └─ github_executor.go
 │  │  ├─ go.mod
 │  │  └─ go.sum
 │  └─ web-react/
-│     ├─ src/App.tsx
 │     ├─ src/main.tsx
+│     ├─ src/AppRouter.tsx
+│     ├─ src/auth.ts
+│     ├─ src/layout/AppLayout.tsx
+│     ├─ src/pages/
+│     │  ├─ LoginPage.tsx
+│     │  ├─ DashboardPage.tsx
+│     │  ├─ EventsPage.tsx
+│     │  └─ AlertsPage.tsx
 │     ├─ package.json
-│     ├─ tsconfig.json
 │     └─ vite.config.ts
 ├─ docs/
+│  ├─ requirements.md
+│  ├─ design.md
 │  └─ handover.md
-├─ infra/
-│  └─ docker/
-├─ .gitignore
+├─ scripts/demo.ps1
 └─ README.md
 ```
 
@@ -60,12 +90,14 @@ maintainer-firewall/
 
 ```powershell
 # e:\VSCodeSpace\reverse\maintainer-firewall\apps\api-go
+$env:GITHUB_WEBHOOK_SECRET="replace_with_webhook_secret"
+$env:GITHUB_TOKEN="optional_github_pat_for_auto_actions"
+$env:ADMIN_USERNAME="admin"
+$env:ADMIN_PASSWORD="admin123"
+$env:JWT_SECRET="mf-demo-jwt-secret"
+$env:DATABASE_URL="postgres://postgres:postgres@localhost:5432/maintainer_firewall?sslmode=disable"
 go run .\cmd\server\main.go
 ```
-
-Health endpoint:
-
-- `http://localhost:8080/health`
 
 ### 2) Web
 
@@ -78,33 +110,33 @@ npm run dev
 Web app:
 
 - `http://localhost:5173`
+- login first, then access dashboard/events/alerts
 
-## Next Milestones
+## Next Milestones (remaining)
 
-### M1: GitHub App webhook ingestion
+### R1: Action execution reliability
 
-- Add `POST /webhook/github`
-- Verify `X-Hub-Signature-256`
-- Persist event metadata to PostgreSQL
+- Retry policy for GitHub action execution
+- Failure recording and traceability
+- Keep webhook persistence path non-blocking
 
-### M2: Basic moderation engine
+### R2: Dashboard value upgrades
 
-- Rule-based issue/PR classification
-- Actions: label/comment/close suggestion
+- Alert summary metrics
+- Rule hit trend snapshots
+- Better empty/error/loading states
 
-### M3: Dashboard
+### R3: E2E automation
 
-- Event list + filters
-- Rule hit statistics
-- Reviewer workload chart
+- End-to-end test: webhook -> events/alerts visible in UI
 
 ## Reopen IDE Quick Resume Checklist
 
 1. Open folder: `e:\VSCodeSpace\reverse\maintainer-firewall`
-2. Start API (Go) and Web (React)
-3. Verify `/health` in browser
-4. Create issue `feat: github webhook endpoint`
-5. Implement webhook signature verification first
+2. Run `go test ./...` in `apps/api-go`
+3. Run `npm run build` in `apps/web-react`
+4. Run one-command demo from repo root: `./scripts/demo.ps1`
+5. Verify login + protected `/events` and `/alerts`
 
 ## Notes
 
