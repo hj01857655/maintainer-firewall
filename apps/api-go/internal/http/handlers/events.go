@@ -12,7 +12,7 @@ import (
 )
 
 type WebhookEventLister interface {
-	ListEvents(ctx context.Context, limit int, offset int, eventType string, action string) ([]store.WebhookEventRecord, error)
+	ListEvents(ctx context.Context, limit int, offset int, eventType string, action string) ([]store.WebhookEventRecord, int64, error)
 }
 
 type EventsHandler struct {
@@ -24,6 +24,7 @@ type listEventsResponse struct {
 	Items     []store.WebhookEventRecord `json:"items"`
 	Limit     int                       `json:"limit"`
 	Offset    int                       `json:"offset"`
+	Total     int64                     `json:"total"`
 	EventType string                    `json:"event_type,omitempty"`
 	Action    string                    `json:"action,omitempty"`
 }
@@ -56,7 +57,7 @@ func (h *EventsHandler) List(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
 	defer cancel()
 
-	items, err := h.Store.ListEvents(ctx, limit, offset, eventType, action)
+	items, total, err := h.Store.ListEvents(ctx, limit, offset, eventType, action)
 	if err != nil {
 		c.JSON(500, gin.H{"ok": false, "message": fmt.Sprintf("list events failed: %v", err)})
 		return
@@ -67,6 +68,7 @@ func (h *EventsHandler) List(c *gin.Context) {
 		Items:     items,
 		Limit:     limit,
 		Offset:    offset,
+		Total:     total,
 		EventType: eventType,
 		Action:    action,
 	})

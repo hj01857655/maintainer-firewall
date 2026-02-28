@@ -74,7 +74,20 @@ func (s *WebhookEventStore) SaveEvent(ctx context.Context, evt WebhookEvent) err
 	return nil
 }
 
-func (s *WebhookEventStore) ListEvents(ctx context.Context, limit int, offset int, eventType string, action string) ([]WebhookEventRecord, error) {
+func (s *WebhookEventStore) ListEvents(ctx context.Context, limit int, offset int, eventType string, action string) ([]WebhookEventRecord, int64, error) {
+	et := strings.TrimSpace(eventType)
+	ac := strings.TrimSpace(action)
+
+	var total int64
+	if err := s.pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM webhook_events
+		WHERE ($1 = '' OR event_type = $1)
+		  AND ($2 = '' OR action = $2)
+	`, et, ac).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count webhook events: %w", err)
+	}
+
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, delivery_id, event_type, action, repository_full_name, sender_login, received_at
 		FROM webhook_events
@@ -82,9 +95,9 @@ func (s *WebhookEventStore) ListEvents(ctx context.Context, limit int, offset in
 		  AND ($2 = '' OR action = $2)
 		ORDER BY received_at DESC
 		LIMIT $3 OFFSET $4
-	`, strings.TrimSpace(eventType), strings.TrimSpace(action), limit, offset)
+	`, et, ac, limit, offset)
 	if err != nil {
-		return nil, fmt.Errorf("query webhook events: %w", err)
+		return nil, 0, fmt.Errorf("query webhook events: %w", err)
 	}
 	defer rows.Close()
 
@@ -100,16 +113,16 @@ func (s *WebhookEventStore) ListEvents(ctx context.Context, limit int, offset in
 			&item.SenderLogin,
 			&item.ReceivedAt,
 		); err != nil {
-			return nil, fmt.Errorf("scan webhook event: %w", err)
+			return nil, 0, fmt.Errorf("scan webhook event: %w", err)
 		}
 		items = append(items, item)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate webhook events: %w", err)
+		return nil, 0, fmt.Errorf("iterate webhook events: %w", err)
 	}
 
-	return items, nil
+	return items, total, nil
 }
 
 func (s *WebhookEventStore) ensureSchema(ctx context.Context) error {
@@ -151,6 +164,14 @@ func (s *WebhookEventStore) ensureSchema(ctx context.Context) error {
 	`)
 	if err != nil {
 		return fmt.Errorf("create idx_webhook_events_action: %w", err)
+	}
+
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_webhook_events_event_action
+		ON webhook_events (event_type, action)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_webhook_events_event_action: %w", err)
 	}
 
 	return nil

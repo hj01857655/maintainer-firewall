@@ -3,7 +3,7 @@ import { AppLayout } from './layout/AppLayout'
 import { DashboardPage } from './pages/DashboardPage'
 import { EventsPage } from './pages/EventsPage'
 
-export function App() {
+export function AppRouter() {
   return (
     <AppLayout>
       <Routes>
