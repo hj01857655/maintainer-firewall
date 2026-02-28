@@ -11,9 +11,11 @@ import (
 
 func main() {
 	cfg := config.Load()
+	webhookHandler := handlers.NewWebhookHandler(cfg.GitHubWebhookSecret)
 
 	r := gin.Default()
 	r.GET("/health", handlers.Health)
+	r.POST("/webhook/github", webhookHandler.GitHub)
 
 	addr := fmt.Sprintf(":%s", cfg.Port)
 	if err := r.Run(addr); err != nil {
