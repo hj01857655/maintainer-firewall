@@ -2,7 +2,10 @@
 
 ## 1. Scope
 
-This design covers M3 in requirements: persist verified GitHub webhook events into PostgreSQL while keeping existing signature verification behavior.
+This design covers M3 and current M4 base:
+
+- M3: persist verified GitHub webhook events into PostgreSQL
+- M4 base: query and display latest events via API + React console
 
 ## 2. Runtime Components
 
@@ -15,13 +18,14 @@ This design covers M3 in requirements: persist verified GitHub webhook events in
 - `internal/http/handlers`
   - request parsing, signature verification, event extraction, store call
 
-## 3. Request Flow
+## 3. Request/Data Flow
 
 1. GitHub sends `POST /webhook/github`
 2. Handler validates `X-Hub-Signature-256` with `GITHUB_WEBHOOK_SECRET`
 3. Handler extracts metadata from headers and JSON payload
 4. Handler writes event into PostgreSQL table `webhook_events`
 5. Handler returns `200` when accepted and persisted
+6. React console calls `GET /events` to render latest records
 
 ## 4. Data Model
 
@@ -59,11 +63,22 @@ Required for M3:
 ## 7. Verification
 
 - `go build ./...`
+- `npm run build`
 - Manual webhook smoke:
   - valid signature -> `200` and row inserted
   - invalid signature -> `401`, no row inserted
+- Events listing:
+  - `GET /events?limit=20&offset=0` returns ordered records
 
-## 8. Next Design Step (M4)
+## 8. M4 Progress
 
-- Add API `GET /events` with pagination and filter by event type/action
-- Build web page for event list and status summary
+Implemented:
+
+- API `GET /events` with pagination params `limit` and `offset`
+- React event list page showing latest webhook events
+
+Next:
+
+- Add filters by `event_type` and `action`
+- Add total count and pagination controls in UI
+- Add endpoint tests for list/query validation

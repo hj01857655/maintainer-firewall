@@ -22,9 +22,11 @@ func main() {
 	defer eventStore.Close()
 
 	webhookHandler := handlers.NewWebhookHandler(cfg.GitHubWebhookSecret, eventStore)
+	eventsHandler := handlers.NewEventsHandler(eventStore)
 
 	r := gin.Default()
 	r.GET("/health", handlers.Health)
+	r.GET("/events", eventsHandler.List)
 	r.POST("/webhook/github", webhookHandler.GitHub)
 
 	addr := fmt.Sprintf(":%s", cfg.Port)

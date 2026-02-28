@@ -2,12 +2,12 @@
 
 Go + React open-source project skeleton for maintainer workflow automation.
 
-Current status: webhook signature verification + PostgreSQL event persistence are implemented.
+Current status: webhook signature verification + PostgreSQL event persistence + event listing API/UI are implemented.
 
 ## Structure
 
 - `apps/api-go`: Go API service (Gin + PostgreSQL event store)
-
+- `apps/web-react`: React console (Vite + TS, health + events list)
 - `infra/docker`: docker files (next step)
 - `docs`: architecture/docs (requirements/design/handover)
 
@@ -26,6 +26,7 @@ go run .\cmd\server\main.go
 API endpoints:
 
 - `GET http://localhost:8080/health`
+- `GET http://localhost:8080/events?limit=20&offset=0`
 - `POST http://localhost:8080/webhook/github`
 
 ## Run Web
@@ -39,10 +40,20 @@ npm run dev
 Web app:
 
 - `http://localhost:5173`
-- automatically proxies `/health` to `http://localhost:8080`
+- automatically proxies `/health` and `/events` to `http://localhost:8080`
 
 ## Docs
 
 - Requirements: `docs/requirements.md`
 - Design: `docs/design.md`
 - Handover: `docs/handover.md`
+
+## Quick API check
+
+```powershell
+# health
+Invoke-RestMethod http://localhost:8080/health
+
+# list events
+Invoke-RestMethod "http://localhost:8080/events?limit=20&offset=0"
+```
