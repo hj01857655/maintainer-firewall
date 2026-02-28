@@ -2,11 +2,14 @@
 
 ## 1. Scope
 
-This design covers M3, M4, and M5-v1:
+This design covers M3, M4, M5-v1 and post-MVP hardening done in this branch:
 
 - M3: persist verified GitHub webhook events into PostgreSQL
 - M4 base: query and display latest events via API + React console
 - M5-v1: rule engine returns suggested label/comment actions
+- M6: configurable rules API (`GET/POST /rules`) and DB-backed rule matching
+- M7: optional GitHub auto actions (label/comment) execution
+- M8: JWT login and protected API routes
 
 ## 2. Runtime Components
 
@@ -21,13 +24,16 @@ This design covers M3, M4, and M5-v1:
 
 ## 3. Request/Data Flow
 
-1. GitHub sends `POST /webhook/github`
-2. Handler validates `X-Hub-Signature-256` with `GITHUB_WEBHOOK_SECRET`
-3. Handler extracts metadata from headers and JSON payload
-4. Handler writes event into PostgreSQL table `webhook_events`
-5. Handler returns `200` when accepted and persisted
-6. Rule engine evaluates payload text and produces suggested actions
-7. React console calls `GET /events` to render latest records
+1. User logs in via `POST /auth/login` and gets JWT
+2. Protected APIs (`/events`, `/alerts`, `/rules`) require `Authorization: Bearer <jwt>`
+3. GitHub sends `POST /webhook/github`
+4. Handler validates `X-Hub-Signature-256` with `GITHUB_WEBHOOK_SECRET`
+5. Handler extracts metadata from headers and JSON payload
+6. Handler writes event into PostgreSQL table `webhook_events`
+7. Handler loads active rules from `webhook_rules` and evaluates suggestions
+8. Handler writes matched suggestions into `webhook_alerts`
+9. If configured, handler executes GitHub actions (`label`/`comment`) via GitHub API
+10. React console calls `GET /events` / `GET /alerts` / `GET /rules`
 
 ## 4. Data Model
 
@@ -58,22 +64,38 @@ Indexes:
 
 ## 6. Config
 
-Required for M3:
+Core runtime config:
 
 - `PORT` (default `8080`)
-- `GITHUB_WEBHOOK_SECRET` (required for webhook)
+- `GITHUB_WEBHOOK_SECRET` (required for webhook signature verify)
 - `DATABASE_URL` (required for persistence)
+
+Auth config:
+
+- `ADMIN_USERNAME` (required for login)
+- `ADMIN_PASSWORD` (required for login)
+- `JWT_SECRET` (preferred; used to sign/verify JWT)
+- `ACCESS_TOKEN` (legacy fallback secret when `JWT_SECRET` is empty)
+
+Automation config:
+
+- `GITHUB_TOKEN` (optional; required only when enabling GitHub auto action execution)
 
 ## 7. Verification
 
+- `go test ./...`
 - `go build ./...`
 - `npm run build`
+- Login:
+  - `POST /auth/login` returns JWT on valid credentials
+  - protected APIs reject missing/invalid bearer token
 - Manual webhook smoke:
   - valid signature -> `200` and row inserted
   - invalid signature -> `401`, no row inserted
-- Events listing:
+- Events/Alerts/Rules listing:
   - `GET /events?limit=20&offset=0&event_type=issues&action=opened` returns ordered filtered records
-  - response includes `total` for pagination
+  - `GET /alerts?...` returns matched suggestions with pagination total
+  - `GET /rules?...` returns configurable rules list
 
 ## 8. M4 Progress
 
@@ -88,21 +110,17 @@ Next:
 - Add endpoint tests for list/query validation
 - Add server-side sorting and richer filters (repository/sender/date range)
 
-## 9. M5 Rule Engine v1
+## 9. Rules + Automation + Auth (current)
 
 Implemented:
 
-- Added keyword-based rule engine for `issues` and `pull_request` events
-- Returns suggested actions in webhook response:
-  - `label` suggestion
-  - `comment` suggestion
-
-Current built-in keyword rules:
-
-- `duplicate` -> `needs-triage`
-- `help wanted` -> `help-wanted`
-- `urgent` -> `priority-high`
-
-Response contract update:
-
-- `POST /webhook/github` now may include `suggested_actions` array
+- Rule engine supports DB-configurable rules via `webhook_rules`
+- `GET /rules` and `POST /rules` for rule management (protected)
+- Webhook response includes `suggested_actions`
+- Matched suggestions persisted in `webhook_alerts`
+- Optional GitHub auto-action execution:
+  - `label` action
+  - `comment` action
+- JWT auth for console APIs:
+  - `POST /auth/login`
+  - middleware-protected `/events`, `/alerts`, `/rules`

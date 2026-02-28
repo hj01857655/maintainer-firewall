@@ -2,7 +2,7 @@
 
 Go + React open-source project skeleton for maintainer workflow automation.
 
-Current status: webhook signature verification + PostgreSQL event persistence + rule suggestion + alerts persistence + events/alerts list API/UI (filter + total pagination) are implemented.
+Current status: webhook signature verification + PostgreSQL event persistence + rule suggestion + alerts persistence + configurable rules + auto action execution + JWT-protected API/UI are implemented.
 
 ## Structure
 
@@ -20,7 +20,9 @@ $env:GITHUB_WEBHOOK_SECRET="replace_with_webhook_secret"
 $env:GITHUB_TOKEN="optional_github_pat_for_auto_actions"
 $env:ADMIN_USERNAME="admin"
 $env:ADMIN_PASSWORD="admin123"
-$env:ACCESS_TOKEN="mf-demo-token"
+$env:JWT_SECRET="mf-demo-jwt-secret"
+# backward-compat fallback if JWT_SECRET is empty:
+# $env:ACCESS_TOKEN="legacy-shared-secret"
 $env:DATABASE_URL="postgres://postgres:postgres@localhost:5432/maintainer_firewall?sslmode=disable"
 go mod tidy
 go run .\cmd\server\main.go
@@ -65,9 +67,9 @@ Web app:
 
 Script does:
 
-- set env vars
+- set env vars (including auth secret)
 - start API in background
-- login and get token
+- login and get JWT token
 - create demo rule
 - send signed webhook
 - query events/alerts and print summary
@@ -75,7 +77,7 @@ Script does:
 ## Quick API check (manual)
 
 ```powershell
-# login
+# login (returns JWT)
 $login = Invoke-RestMethod -Method Post -Uri http://localhost:8080/auth/login -ContentType "application/json" -Body '{"username":"admin","password":"admin123"}'
 $headers = @{ Authorization = "Bearer $($login.token)" }
 
@@ -99,7 +101,7 @@ Invoke-RestMethod "http://localhost:8080/alerts?limit=20&offset=0&event_type=iss
 - Persist rule-hit alerts
 - Configurable rules API (`GET/POST /rules`)
 - Auto execute GitHub actions (label/comment)
-- Login + protected API/UI routes
+- Login + protected API/UI routes (JWT)
 - Query events with pagination/filter + `total`
 - Query alerts with pagination/filter + `total`
 - Web pages for events/alerts
