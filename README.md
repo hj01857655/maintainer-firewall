@@ -6,35 +6,45 @@ Current status: webhook signature verification + DB event persistence (PostgreSQ
 
 ## Structure
 
-- `apps/api-go`: Go API service (Gin + PostgreSQL/MySQL event/alert store)
+- `apps/api-go`: Go API service (Gin + PostgreSQL/MySQL event/alert store, supports auto-loading env from `.env` and auto-creating `.env` from `.env.example`)
 - `apps/web-react`: React console (Vite + TS + React Router, dashboard + events + alerts pages)
 - `docs`: architecture/docs (requirements/design/handover)
 
 ## Run API
 
-Before starting API, set required environment variables:
+Before starting API, you can create a `.env` once (or export env vars manually):
+
+```powershell
+# <repo-root>
+Copy-Item .env.example .env
+# edit .env and set DATABASE_URL (others can keep defaults)
+```
+
+If `.env` is missing at startup, API will auto-create it from `.env.example`.
+
+Then run API:
 
 ```powershell
 # <repo-root>/apps/api-go
-$env:GITHUB_WEBHOOK_SECRET="replace_with_webhook_secret"
-$env:GITHUB_TOKEN="optional_github_pat_for_auto_actions"
-$env:ADMIN_USERNAME="admin"
-$env:ADMIN_PASSWORD="CHANGE_ME_ADMIN_PASSWORD"
-$env:JWT_SECRET="CHANGE_ME_JWT_SECRET"
-# backward-compat fallback if JWT_SECRET is empty:
-# $env:ACCESS_TOKEN="legacy-shared-secret"
-# PostgreSQL example
-$env:DATABASE_URL="postgres://postgres:postgres@localhost:5432/maintainer_firewall?sslmode=disable"
-# MySQL example
-# $env:DATABASE_URL="mysql://<MYSQL_USER>:<MYSQL_PASSWORD>@127.0.0.1:3306/maintainer_firewall"
 go mod tidy
 go run .\cmd\server\main.go
 ```
 
+Local defaults when omitted (development only):
+
+- PORT=8080
+- ADMIN_USERNAME=admin
+- ADMIN_PASSWORD=admin123
+- JWT_SECRET=dev-jwt-secret (or ACCESS_TOKEN fallback)
+- GITHUB_WEBHOOK_SECRET=dev-webhook-secret
+- GITHUB_TOKEN is optional (empty by default)
+- DATABASE_URL is still required (set in `.env`/environment; if omitted, API starts but store initialization will fail)
+
+
 API endpoints:
 
 - `GET http://localhost:8080/health`
-- `POST http://localhost:8080/auth/login`
+- `POST http://localhost:8080/auth/login` (default local account in development: `admin` / `admin123`)
 - `GET http://localhost:8080/events?limit=20&offset=0&event_type=issues&action=opened` (auth required)
   - response includes `total` for pagination
 - `GET http://localhost:8080/alerts?limit=20&offset=0&event_type=issues&action=opened&suggestion_type=label` (auth required)

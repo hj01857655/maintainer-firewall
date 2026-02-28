@@ -35,3 +35,4 @@ coverage/
 
 # Breezell local workspace config
 .breezell/
+.env.example
