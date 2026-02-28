@@ -1,5 +1,6 @@
-import type { CSSProperties } from 'react'
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { authHeaders } from '../auth'
 
 type AlertItem = {
@@ -18,22 +19,19 @@ type AlertItem = {
 type AlertsResponse = {
   ok: boolean
   items: AlertItem[]
-  limit: number
-  offset: number
   total: number
-  event_type?: string
-  action?: string
-  suggestion_type?: string
+  message?: string
 }
 
 export function AlertsPage() {
+  const { t } = useTranslation()
   const [alerts, setAlerts] = useState<AlertItem[]>([])
-  const [error, setError] = useState<string>('')
-  const [eventTypeFilter, setEventTypeFilter] = useState<string>('')
-  const [actionFilter, setActionFilter] = useState<string>('')
-  const [suggestionTypeFilter, setSuggestionTypeFilter] = useState<string>('')
-  const [offset, setOffset] = useState<number>(0)
-  const [total, setTotal] = useState<number>(0)
+  const [error, setError] = useState('')
+  const [eventTypeFilter, setEventTypeFilter] = useState('')
+  const [actionFilter, setActionFilter] = useState('')
+  const [suggestionTypeFilter, setSuggestionTypeFilter] = useState('')
+  const [offset, setOffset] = useState(0)
+  const [total, setTotal] = useState(0)
   const limit = 20
 
   useEffect(() => {
@@ -42,98 +40,158 @@ export function AlertsPage() {
     if (actionFilter) params.set('action', actionFilter)
     if (suggestionTypeFilter) params.set('suggestion_type', suggestionTypeFilter)
 
-    fetch(`/alerts?${params.toString()}`, { headers: authHeaders() })
-      .then((r) => {
-
-        return r.json()
+    fetch(`/api/alerts?${params.toString()}`, { headers: authHeaders() })
+      .then(async (r) => {
+        if (!r.ok) {
+          const body = await r.text()
+          throw new Error(`alerts HTTP ${r.status} ${body}`.trim())
+        }
+        return r.json() as Promise<AlertsResponse>
       })
       .then((data: AlertsResponse) => {
-        if (!data.ok) throw new Error('alerts response not ok')
+        if (!data.ok) throw new Error(data.message || 'alerts response not ok')
         setAlerts(data.items)
         setTotal(data.total)
         setError('')
       })
-      .catch((e: Error) => setError((prev) => (prev ? `${prev}; ${e.message}` : e.message)))
+      .catch((e: Error) => setError(e.message))
   }, [eventTypeFilter, actionFilter, suggestionTypeFilter, offset])
 
   const currentPage = useMemo(() => Math.floor(offset / limit) + 1, [offset])
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / limit)), [total])
 
   return (
-    <section>
-      <h1 style={{ marginTop: 0 }}>Alerts</h1>
+    <section className="space-y-4">
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
+        <h1 className="m-0 text-2xl font-semibold tracking-tight text-slate-900">Alerts</h1>
+        <p className="mt-2 text-sm text-slate-600">查看规则命中后的建议动作与原因。</p>
 
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
-        <label style={labelStyle}>
-          Event Type
-          <input style={inputStyle} value={eventTypeFilter} onChange={(e) => { setOffset(0); setEventTypeFilter(e.target.value) }} placeholder="issues / pull_request" />
-        </label>
+        <div className="mt-4 grid gap-3 md:grid-cols-4">
+          <label className="block text-sm font-medium text-slate-700">
+            <span>Event Type</span>
+            <input
+              className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3 text-base text-slate-900 outline-none transition-colors duration-200 placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              value={eventTypeFilter}
+              onChange={(e) => {
+                setOffset(0)
+                setEventTypeFilter(e.target.value)
+              }}
+              placeholder="issues / pull_request"
+            />
+          </label>
 
-        <label style={labelStyle}>
-          Action
-          <input style={inputStyle} value={actionFilter} onChange={(e) => { setOffset(0); setActionFilter(e.target.value) }} placeholder="opened / edited / closed" />
-        </label>
+          <label className="block text-sm font-medium text-slate-700">
+            <span>Action</span>
+            <input
+              className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3 text-base text-slate-900 outline-none transition-colors duration-200 placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              value={actionFilter}
+              onChange={(e) => {
+                setOffset(0)
+                setActionFilter(e.target.value)
+              }}
+              placeholder="opened / edited / closed"
+            />
+          </label>
 
-        <label style={labelStyle}>
-          Suggestion Type
-          <input style={inputStyle} value={suggestionTypeFilter} onChange={(e) => { setOffset(0); setSuggestionTypeFilter(e.target.value) }} placeholder="label / comment" />
-        </label>
+          <label className="block text-sm font-medium text-slate-700">
+            <span>Suggestion Type</span>
+            <input
+              className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3 text-base text-slate-900 outline-none transition-colors duration-200 placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              value={suggestionTypeFilter}
+              onChange={(e) => {
+                setOffset(0)
+                setSuggestionTypeFilter(e.target.value)
+              }}
+              placeholder="label / comment"
+            />
+          </label>
 
-        <button style={buttonStyle} onClick={() => setOffset(0)} aria-label="应用筛选">Apply Filters</button>
-      </div>
-
-      {alerts.length === 0 ? (
-        <p style={{ color: '#475569' }}>no alerts matched current filters</p>
-      ) : (
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1100, background: '#FFFFFF' }}>
-            <thead>
-              <tr>
-                <th style={thStyle}>Delivery</th>
-                <th style={thStyle}>Type</th>
-                <th style={thStyle}>Action</th>
-                <th style={thStyle}>Suggestion Type</th>
-                <th style={thStyle}>Suggestion Value</th>
-                <th style={thStyle}>Rule Matched</th>
-                <th style={thStyle}>Reason</th>
-                <th style={thStyle}>Repository</th>
-                <th style={thStyle}>Sender</th>
-                <th style={thStyle}>Created At</th>
-              </tr>
-            </thead>
-            <tbody>
-              {alerts.map((item) => (
-                <tr key={`${item.delivery_id}-${item.suggestion_type}-${item.suggestion_value}-${item.rule_matched}`}>
-                  <td style={tdStyle}>{item.delivery_id}</td>
-                  <td style={tdStyle}>{item.event_type}</td>
-                  <td style={tdStyle}>{item.action || '-'}</td>
-                  <td style={tdStyle}>{item.suggestion_type}</td>
-                  <td style={tdStyle}>{item.suggestion_value}</td>
-                  <td style={tdStyle}>{item.rule_matched}</td>
-                  <td style={tdStyle}>{item.reason}</td>
-                  <td style={tdStyle}>{item.repository_full_name}</td>
-                  <td style={tdStyle}>{item.sender_login}</td>
-                  <td style={tdStyle}>{new Date(item.created_at).toLocaleString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="flex items-end">
+            <button
+              className="h-11 w-full cursor-pointer rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white transition-colors duration-200 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              onClick={() => setOffset(0)}
+              aria-label="应用筛选"
+            >
+              Apply Filters
+            </button>
+          </div>
         </div>
-      )}
-
-      <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center' }}>
-        <button style={buttonStyle} onClick={() => setOffset((v) => Math.max(0, v - limit))} disabled={offset === 0} aria-label="上一页">Prev</button>
-        <button style={buttonStyle} onClick={() => setOffset((v) => v + limit)} disabled={currentPage >= totalPages} aria-label="下一页">Next</button>
-        <span style={{ color: '#475569' }}>page: {currentPage} / {totalPages} · total: {total}</span>
       </div>
 
-      {error ? <p style={{ color: '#EF4444', marginTop: 16 }}>error: {error}</p> : null}
+      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <table className="min-w-[1120px] w-full text-sm">
+          <thead className="bg-slate-50 text-slate-700">
+            <tr>
+              <th className="px-3 py-3 text-left font-semibold">Delivery</th>
+              <th className="px-3 py-3 text-left font-semibold">Type</th>
+              <th className="px-3 py-3 text-left font-semibold">Action</th>
+              <th className="px-3 py-3 text-left font-semibold">Suggestion Type</th>
+              <th className="px-3 py-3 text-left font-semibold">Suggestion Value</th>
+              <th className="px-3 py-3 text-left font-semibold">Rule Matched</th>
+              <th className="px-3 py-3 text-left font-semibold">Reason</th>
+              <th className="px-3 py-3 text-left font-semibold">Repository</th>
+              <th className="px-3 py-3 text-left font-semibold">Sender</th>
+              <th className="px-3 py-3 text-left font-semibold">Created At</th>
+              <th className="px-3 py-3 text-left font-semibold">{t('alerts.table.manageRule')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {alerts.map((item) => (
+              <tr
+                key={`${item.delivery_id}-${item.suggestion_type}-${item.suggestion_value}-${item.rule_matched}`}
+                className="border-t border-slate-200 hover:bg-slate-50/70"
+              >
+                <td className="px-3 py-3 text-slate-900">{item.delivery_id}</td>
+                <td className="px-3 py-3 text-slate-900">{item.event_type}</td>
+                <td className="px-3 py-3 text-slate-900">{item.action || '-'}</td>
+                <td className="px-3 py-3 text-slate-900">{item.suggestion_type}</td>
+                <td className="px-3 py-3 text-slate-900">{item.suggestion_value}</td>
+                <td className="px-3 py-3 text-slate-900">{item.rule_matched}</td>
+                <td className="px-3 py-3 text-slate-900">{item.reason}</td>
+                <td className="px-3 py-3 text-slate-900">{item.repository_full_name}</td>
+                <td className="px-3 py-3 text-slate-900">{item.sender_login}</td>
+                <td className="px-3 py-3 text-slate-900">{new Date(item.created_at).toLocaleString()}</td>
+                <td className="px-3 py-3 text-slate-900">
+                  <Link
+                    to={`/rules?${new URLSearchParams({
+                      event_type: item.event_type,
+                      keyword: item.rule_matched,
+                      active_only: 'false',
+                    }).toString()}`}
+                    className="inline-flex min-h-9 cursor-pointer items-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition-colors duration-200 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                  >
+                    {t('alerts.table.goRules')}
+                  </Link>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {alerts.length === 0 ? <p className="text-sm text-slate-600">no alerts matched current filters</p> : null}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          className="h-11 min-w-[88px] cursor-pointer rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+          onClick={() => setOffset((v) => Math.max(0, v - limit))}
+          disabled={offset === 0}
+          aria-label="上一页"
+        >
+          Prev
+        </button>
+        <button
+          className="h-11 min-w-[88px] cursor-pointer rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+          onClick={() => setOffset((v) => v + limit)}
+          disabled={currentPage >= totalPages}
+          aria-label="下一页"
+        >
+          Next
+        </button>
+        <span className="text-sm text-slate-600">page: {currentPage} / {totalPages} · total: {total}</span>
+      </div>
+
+      {error ? <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">error: {error}</p> : null}
     </section>
   )
 }
-
-const thStyle: CSSProperties = { textAlign: 'left', padding: '10px 8px', borderBottom: '1px solid #E2E8F0', color: '#334155', fontWeight: 600 }
-const tdStyle: CSSProperties = { padding: '10px 8px', borderBottom: '1px solid #E2E8F0', color: '#0F172A', fontSize: 14 }
-const labelStyle: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6, color: '#334155', fontSize: 14 }
-const inputStyle: CSSProperties = { minHeight: 40, minWidth: 220, border: '1px solid #E2E8F0', borderRadius: 8, padding: '8px 10px', color: '#0F172A' }
-const buttonStyle: CSSProperties = { minHeight: 40, padding: '0 14px', border: '1px solid #CBD5E1', borderRadius: 8, background: '#FFFFFF', color: '#0F172A', cursor: 'pointer', transition: 'background-color 0.2s ease' }

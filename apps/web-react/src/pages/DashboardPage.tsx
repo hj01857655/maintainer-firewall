@@ -1,5 +1,5 @@
-import type { CSSProperties } from 'react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { authHeaders } from '../auth'
 
 type Health = {
@@ -7,36 +7,134 @@ type Health = {
   service: string
 }
 
+type MetricsOverview = {
+  events_24h: number
+  alerts_24h: number
+  failures_24h: number
+  success_rate_24h: number
+  p95_latency_ms_24h: number
+}
+
+type MetricsPoint = {
+  bucket_start: string
+  events: number
+  alerts: number
+  failures: number
+}
+
 export function DashboardPage() {
+  const { t } = useTranslation()
   const [health, setHealth] = useState<Health | null>(null)
+  const [overview, setOverview] = useState<MetricsOverview | null>(null)
+  const [series, setSeries] = useState<MetricsPoint[]>([])
   const [error, setError] = useState('')
+  const [windowValue, setWindowValue] = useState<'6h' | '12h' | '24h'>('24h')
 
   useEffect(() => {
-    fetch('/health', { headers: authHeaders() })
-      .then((r) => {
-
-        return r.json()
+    Promise.all([
+      fetch('/api/health', { headers: authHeaders() }).then((r) => r.json() as Promise<Health>),
+      fetch(`/api/metrics/overview?window=${windowValue}`, { headers: authHeaders() }).then(async (r) => {
+        if (!r.ok) throw new Error(await r.text())
+        return r.json() as Promise<{ ok: boolean; overview: MetricsOverview }>
+      }),
+      fetch(`/api/metrics/timeseries?window=${windowValue}&interval_minutes=60`, { headers: authHeaders() }).then(async (r) => {
+        if (!r.ok) throw new Error(await r.text())
+        return r.json() as Promise<{ ok: boolean; items: MetricsPoint[] }>
+      }),
+    ])
+      .then(([healthData, overviewResp, seriesResp]) => {
+        setHealth(healthData)
+        setOverview(overviewResp.overview)
+        setSeries(seriesResp.items || [])
       })
-      .then((data: Health) => setHealth(data))
       .catch((e: Error) => setError(e.message))
-  }, [])
+  }, [windowValue])
+
+  const maxY = useMemo(() => {
+    const max = series.reduce((acc, item) => Math.max(acc, item.events, item.alerts, item.failures), 0)
+    return Math.max(1, max)
+  }, [series])
+
+  function linePath(values: number[]) {
+    if (values.length === 0) return ''
+    return values
+      .map((v, i) => {
+        const x = (i / Math.max(1, values.length - 1)) * 100
+        const y = 100 - (v / maxY) * 100
+        return `${x},${y}`
+      })
+      .join(' ')
+  }
+
+  const eventsPath = linePath(series.map((s) => s.events))
+  const alertsPath = linePath(series.map((s) => s.alerts))
+  const failuresPath = linePath(series.map((s) => s.failures))
 
   return (
-    <section>
-      <h1 style={{ marginTop: 0 }}>Dashboard</h1>
-      <p style={{ color: '#475569' }}>Service overview and quick status.</p>
-
-      <div style={cardStyle}>
-        <h3 style={{ marginTop: 0 }}>API Health</h3>
-        {health ? <pre style={{ margin: 0 }}>{JSON.stringify(health, null, 2)}</pre> : <p>{error || 'Loading...'}</p>}
+    <section className="space-y-4">
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
+        <h1 className="m-0 text-2xl font-semibold tracking-tight text-slate-900">{t('dashboard.title')}</h1>
+        <p className="mt-2 text-sm leading-relaxed text-slate-600">{t('dashboard.subtitle')}</p>
       </div>
+
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <MetricCard label={t('dashboard.cards.events24h')} value={overview?.events_24h ?? 0} />
+        <MetricCard label={t('dashboard.cards.alerts24h')} value={overview?.alerts_24h ?? 0} />
+        <MetricCard label={t('dashboard.cards.failures24h')} value={overview?.failures_24h ?? 0} />
+        <MetricCard label={t('dashboard.cards.successRate24h')} value={`${(overview?.success_rate_24h ?? 0).toFixed(2)}%`} />
+        <MetricCard label={t('dashboard.cards.p95Latency24h')} value={`${Math.round(overview?.p95_latency_ms_24h ?? 0)}`} />
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="m-0 text-lg font-semibold text-slate-900">{t('dashboard.trendTitle')}</h2>
+          <div className="inline-flex rounded-lg border border-slate-300 bg-white p-1">
+            {(['6h', '12h', '24h'] as const).map((w) => (
+              <button
+                key={w}
+                type="button"
+                className={[
+                  'h-8 min-w-[52px] cursor-pointer rounded-md px-3 text-xs font-semibold transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500',
+                  windowValue === w ? 'bg-blue-600 text-white' : 'text-slate-700 hover:bg-slate-100',
+                ].join(' ')}
+                onClick={() => setWindowValue(w)}
+              >
+                {w}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="mt-3 h-56 w-full rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full">
+            <polyline points={eventsPath} fill="none" stroke="#3B82F6" strokeWidth="1.8" />
+            <polyline points={alertsPath} fill="none" stroke="#F59E0B" strokeWidth="1.8" />
+            <polyline points={failuresPath} fill="none" stroke="#EF4444" strokeWidth="1.8" />
+          </svg>
+        </div>
+        <p className="mt-2 text-xs text-slate-500">blue=events, amber=alerts, red=failures</p>
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
+        <h2 className="m-0 text-lg font-semibold text-slate-900">{t('dashboard.apiHealth')}</h2>
+        {health ? (
+          <pre className="mt-3 overflow-x-auto rounded-xl bg-slate-900 p-4 text-sm text-slate-100">
+            {JSON.stringify(health, null, 2)}
+          </pre>
+        ) : (
+          <p className="mt-3 text-sm text-slate-600">{error || t('common.loading')}</p>
+        )}
+      </div>
+
+      {error ? <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">{t('common.error', { message: error })}</p> : null}
     </section>
   )
 }
 
-const cardStyle: CSSProperties = {
-  background: '#FFFFFF',
-  border: '1px solid #E2E8F0',
-  borderRadius: 10,
-  padding: 16,
+function MetricCard({ label, value }: { label: string; value: number | string }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <p className="text-xs text-slate-500">{label}</p>
+      <p className="mt-1 text-2xl font-semibold text-slate-900">{value}</p>
+    </div>
+  )
 }

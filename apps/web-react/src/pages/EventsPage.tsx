@@ -1,4 +1,3 @@
-import type { CSSProperties } from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { authHeaders } from '../auth'
 
@@ -15,20 +14,17 @@ type EventItem = {
 type EventsResponse = {
   ok: boolean
   items: EventItem[]
-  limit: number
-  offset: number
   total: number
-  event_type?: string
-  action?: string
+  message?: string
 }
 
 export function EventsPage() {
   const [events, setEvents] = useState<EventItem[]>([])
-  const [error, setError] = useState<string>('')
-  const [eventTypeFilter, setEventTypeFilter] = useState<string>('')
-  const [actionFilter, setActionFilter] = useState<string>('')
-  const [offset, setOffset] = useState<number>(0)
-  const [total, setTotal] = useState<number>(0)
+  const [error, setError] = useState('')
+  const [eventTypeFilter, setEventTypeFilter] = useState('')
+  const [actionFilter, setActionFilter] = useState('')
+  const [offset, setOffset] = useState(0)
+  const [total, setTotal] = useState(0)
   const limit = 20
 
   useEffect(() => {
@@ -36,84 +32,120 @@ export function EventsPage() {
     if (eventTypeFilter) params.set('event_type', eventTypeFilter)
     if (actionFilter) params.set('action', actionFilter)
 
-    fetch(`/events?${params.toString()}`, { headers: authHeaders() })
-      .then((r) => {
-
-        return r.json()
+    fetch(`/api/events?${params.toString()}`, { headers: authHeaders() })
+      .then(async (r) => {
+        if (!r.ok) {
+          const body = await r.text()
+          throw new Error(`events HTTP ${r.status} ${body}`.trim())
+        }
+        return r.json() as Promise<EventsResponse>
       })
       .then((data: EventsResponse) => {
-        if (!data.ok) throw new Error('events response not ok')
+        if (!data.ok) throw new Error(data.message || 'events response not ok')
         setEvents(data.items)
         setTotal(data.total)
       })
-      .catch((e: Error) => setError((prev) => (prev ? `${prev}; ${e.message}` : e.message)))
+      .catch((e: Error) => setError(e.message))
   }, [eventTypeFilter, actionFilter, offset])
 
   const currentPage = useMemo(() => Math.floor(offset / limit) + 1, [offset])
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / limit)), [total])
 
   return (
-    <section>
-      <h1 style={{ marginTop: 0 }}>Events</h1>
+    <section className="space-y-4">
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
+        <h1 className="m-0 text-2xl font-semibold tracking-tight text-slate-900">Events</h1>
+        <p className="mt-2 text-sm text-slate-600">查看 webhook 事件流并按条件筛选。</p>
 
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
-        <label style={labelStyle}>
-          Event Type
-          <input style={inputStyle} value={eventTypeFilter} onChange={(e) => { setOffset(0); setEventTypeFilter(e.target.value) }} placeholder="issues / pull_request" />
-        </label>
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <label className="block text-sm font-medium text-slate-700">
+            <span>Event Type</span>
+            <input
+              className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3 text-base text-slate-900 outline-none transition-colors duration-200 placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              value={eventTypeFilter}
+              onChange={(e) => {
+                setOffset(0)
+                setEventTypeFilter(e.target.value)
+              }}
+              placeholder="issues / pull_request"
+            />
+          </label>
 
-        <label style={labelStyle}>
-          Action
-          <input style={inputStyle} value={actionFilter} onChange={(e) => { setOffset(0); setActionFilter(e.target.value) }} placeholder="opened / edited / closed" />
-        </label>
+          <label className="block text-sm font-medium text-slate-700">
+            <span>Action</span>
+            <input
+              className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3 text-base text-slate-900 outline-none transition-colors duration-200 placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              value={actionFilter}
+              onChange={(e) => {
+                setOffset(0)
+                setActionFilter(e.target.value)
+              }}
+              placeholder="opened / edited / closed"
+            />
+          </label>
 
-        <button style={buttonStyle} onClick={() => setOffset(0)} aria-label="应用筛选">Apply Filters</button>
-      </div>
-
-      {events.length === 0 ? (
-        <p style={{ color: '#475569' }}>no events matched current filters</p>
-      ) : (
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760, background: '#FFFFFF' }}>
-            <thead>
-              <tr>
-                <th style={thStyle}>ID</th>
-                <th style={thStyle}>Type</th>
-                <th style={thStyle}>Action</th>
-                <th style={thStyle}>Repository</th>
-                <th style={thStyle}>Sender</th>
-                <th style={thStyle}>Received At</th>
-              </tr>
-            </thead>
-            <tbody>
-              {events.map((evt) => (
-                <tr key={evt.id}>
-                  <td style={tdStyle}>{evt.id}</td>
-                  <td style={tdStyle}>{evt.event_type}</td>
-                  <td style={tdStyle}>{evt.action || '-'}</td>
-                  <td style={tdStyle}>{evt.repository_full_name}</td>
-                  <td style={tdStyle}>{evt.sender_login}</td>
-                  <td style={tdStyle}>{new Date(evt.received_at).toLocaleString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="flex items-end">
+            <button
+              className="h-11 w-full cursor-pointer rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white transition-colors duration-200 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              onClick={() => setOffset(0)}
+              aria-label="应用筛选"
+            >
+              Apply Filters
+            </button>
+          </div>
         </div>
-      )}
-
-      <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center' }}>
-        <button style={buttonStyle} onClick={() => setOffset((v) => Math.max(0, v - limit))} disabled={offset === 0} aria-label="上一页">Prev</button>
-        <button style={buttonStyle} onClick={() => setOffset((v) => v + limit)} disabled={currentPage >= totalPages} aria-label="下一页">Next</button>
-        <span style={{ color: '#475569' }}>page: {currentPage} / {totalPages} · total: {total}</span>
       </div>
 
-      {error ? <p style={{ color: '#EF4444', marginTop: 16 }}>error: {error}</p> : null}
+      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <table className="min-w-[760px] w-full text-sm">
+          <thead className="bg-slate-50 text-slate-700">
+            <tr>
+              <th className="px-3 py-3 text-left font-semibold">ID</th>
+              <th className="px-3 py-3 text-left font-semibold">Type</th>
+              <th className="px-3 py-3 text-left font-semibold">Action</th>
+              <th className="px-3 py-3 text-left font-semibold">Repository</th>
+              <th className="px-3 py-3 text-left font-semibold">Sender</th>
+              <th className="px-3 py-3 text-left font-semibold">Received At</th>
+            </tr>
+          </thead>
+          <tbody>
+            {events.map((evt) => (
+              <tr key={evt.id} className="border-t border-slate-200 hover:bg-slate-50/70">
+                <td className="px-3 py-3 text-slate-900">{evt.id}</td>
+                <td className="px-3 py-3 text-slate-900">{evt.event_type}</td>
+                <td className="px-3 py-3 text-slate-900">{evt.action || '-'}</td>
+                <td className="px-3 py-3 text-slate-900">{evt.repository_full_name}</td>
+                <td className="px-3 py-3 text-slate-900">{evt.sender_login}</td>
+                <td className="px-3 py-3 text-slate-900">{new Date(evt.received_at).toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {events.length === 0 ? <p className="text-sm text-slate-600">no events matched current filters</p> : null}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          className="h-11 min-w-[88px] cursor-pointer rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+          onClick={() => setOffset((v) => Math.max(0, v - limit))}
+          disabled={offset === 0}
+          aria-label="上一页"
+        >
+          Prev
+        </button>
+        <button
+          className="h-11 min-w-[88px] cursor-pointer rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+          onClick={() => setOffset((v) => v + limit)}
+          disabled={currentPage >= totalPages}
+          aria-label="下一页"
+        >
+          Next
+        </button>
+        <span className="text-sm text-slate-600">page: {currentPage} / {totalPages} · total: {total}</span>
+      </div>
+
+      {error ? <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">error: {error}</p> : null}
     </section>
   )
 }
-
-const thStyle: CSSProperties = { textAlign: 'left', padding: '10px 8px', borderBottom: '1px solid #E2E8F0', color: '#334155', fontWeight: 600 }
-const tdStyle: CSSProperties = { padding: '10px 8px', borderBottom: '1px solid #E2E8F0', color: '#0F172A', fontSize: 14 }
-const labelStyle: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6, color: '#334155', fontSize: 14 }
-const inputStyle: CSSProperties = { minHeight: 40, minWidth: 220, border: '1px solid #E2E8F0', borderRadius: 8, padding: '8px 10px', color: '#0F172A' }
-const buttonStyle: CSSProperties = { minHeight: 40, padding: '0 14px', border: '1px solid #CBD5E1', borderRadius: 8, background: '#FFFFFF', color: '#0F172A', cursor: 'pointer', transition: 'background-color 0.2s ease' }
