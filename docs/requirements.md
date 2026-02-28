@@ -111,6 +111,9 @@ Build a self-hostable service that helps maintainers reduce noisy triage work an
   - `GET /events?source=github&sync=true`
     - fetch recent GitHub user events and persist into `webhook_events`
     - return sync summary (`saved`, `total`)
+- Support scheduled sync worker via config:
+  - `GITHUB_EVENTS_SYNC_INTERVAL_MINUTES`
+  - `0` = disabled, `>0` = periodic sync interval in minutes
 - Must use configured `GITHUB_TOKEN` and reject when token/provider is unavailable.
 - Delivery id for synced GitHub events should be normalized as `gh-<github_event_id>` for idempotent upsert.
 
@@ -140,11 +143,12 @@ For current main-flow completion, all are required:
 12. Action failure does not prevent webhook success after core persistence.
 13. `GET /events?source=github` returns recent GitHub `event_types`.
 14. `GET /events?source=github&sync=true` persists pulled events into `webhook_events` idempotently.
-15. Observability endpoints provide overview/timeseries/audit data.
-16. Runtime config endpoints provide view/update/status capabilities.
-17. `go test ./...` and `go build ./...` pass.
-18. `npm run build` passes.
-19. README/docs include setup and run instructions.
+15. Setting `GITHUB_EVENTS_SYNC_INTERVAL_MINUTES>0` enables periodic GitHub event sync to `webhook_events`.
+16. Observability endpoints provide overview/timeseries/audit data.
+17. Runtime config endpoints provide view/update/status capabilities.
+18. `go test ./...` and `go build ./...` pass.
+19. `npm run build` passes.
+20. README/docs include setup and run instructions.
 
 ## 9. Milestones
 
@@ -158,7 +162,7 @@ For current main-flow completion, all are required:
 - **M8**: Optional GitHub action execution (label/comment) (done)
 - **M9**: JWT login + protected API/UI routes (done)
 - **M10**: action retry + failure recording without blocking webhook core path (done)
-- **M11**: `/events` GitHub source mode + on-demand sync-to-DB (`source=github`, `sync=true`) (in progress)
+- **M11**: `/events` GitHub source mode + on-demand/periodic sync-to-DB (`source=github`, `sync=true`, scheduler) (done)
 
 ## 10. Risks and Mitigations
 

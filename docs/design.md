@@ -11,7 +11,7 @@ This design covers M3, M4, M5-v1 and post-MVP hardening done in this branch:
 - M7: optional GitHub auto actions (label/comment) execution
 - M8: JWT login and protected API routes
 - M9: action retry + failure recording without blocking webhook acceptance
-- M11: extend existing `/events` with GitHub source pull and on-demand sync-to-DB (`source=github`, `sync=true`)
+- M11: extend existing `/events` with GitHub source pull and on-demand/periodic sync-to-DB (`source=github`, `sync=true`, scheduler)
 
 ## 2. Runtime Components
 
@@ -23,6 +23,8 @@ This design covers M3, M4, M5-v1 and post-MVP hardening done in this branch:
   - PostgreSQL/MySQL persistence for `webhook_events` and related tables
 - `internal/service/github_executor.go`
   - GitHub API client for action execution and user-event pull
+- `internal/service/github_sync_worker.go`
+  - periodic scheduler for GitHub event sync
 - `internal/http/handlers`
   - request parsing, signature verification, event extraction, store call
   - `/events` GitHub source mode + optional sync
@@ -42,7 +44,8 @@ This design covers M3, M4, M5-v1 and post-MVP hardening done in this branch:
 11. Webhook still returns success after core persistence path completes
 12. `GET /events?source=github` pulls recent user events from GitHub and returns unique `event_types`
 13. `GET /events?source=github&sync=true` pulls recent user events and persists them into `webhook_events`
-14. React console calls `GET /events` / `GET /alerts` / `GET /rules`
+14. If `GITHUB_EVENTS_SYNC_INTERVAL_MINUTES > 0`, background worker periodically invokes the same sync path
+15. React console calls `GET /events` / `GET /alerts` / `GET /rules`
 
 ## 4. Data Model
 
@@ -90,12 +93,17 @@ Auth config:
 Automation config:
 
 - `GITHUB_TOKEN` (optional; required only when enabling GitHub auto action execution)
+- `GITHUB_EVENTS_SYNC_INTERVAL_MINUTES` (`0` disabled, `>0` periodic sync interval in minutes)
 
 ## 7. Verification
 
 - `go test ./...`
 - `go build ./...`
 - `npm run build`
+- periodic sync smoke:
+  - set `GITHUB_EVENTS_SYNC_INTERVAL_MINUTES=5`
+  - observe server log `github events sync done: saved=... total=...`
+  - verify `webhook_events` grows with `delivery_id` prefix `gh-` (idempotent on repeats)
 - Login:
   - `POST /auth/login` returns JWT on valid credentials
   - protected APIs reject missing/invalid bearer token

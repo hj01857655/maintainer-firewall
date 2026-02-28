@@ -8,15 +8,16 @@ import (
 )
 
 type Config struct {
-	Port                string
-	GitHubWebhookSecret string
-	GitHubToken         string
-	AdminUsername       string
-	AdminPassword       string
-	JWTSecret           string
-	DatabaseURL         string
-	AuthEnvFallback     bool
-	BootstrapAdmin      bool
+	Port                     string
+	GitHubWebhookSecret      string
+	GitHubToken              string
+	AdminUsername            string
+	AdminPassword            string
+	JWTSecret                string
+	DatabaseURL              string
+	AuthEnvFallback          bool
+	BootstrapAdmin           bool
+	GitHubSyncIntervalMinute int
 }
 
 func Load() Config {
@@ -28,6 +29,7 @@ func Load() Config {
 	githubWebhookSecret := getenvOrDefault("GITHUB_WEBHOOK_SECRET", "dev-webhook-secret")
 	authEnvFallback := strings.ToLower(strings.TrimSpace(getenvOrDefault("AUTH_ENV_FALLBACK", "true"))) != "false"
 	bootstrapAdmin := strings.ToLower(strings.TrimSpace(getenvOrDefault("BOOTSTRAP_ADMIN_ON_START", "true"))) != "false"
+	githubSyncIntervalMinute := parseSyncIntervalMinutes(getenvOrDefault("GITHUB_EVENTS_SYNC_INTERVAL_MINUTES", "0"))
 
 	jwtSecret := os.Getenv("JWT_SECRET")
 	if jwtSecret == "" {
@@ -38,16 +40,38 @@ func Load() Config {
 	}
 
 	return Config{
-		Port:                port,
-		GitHubWebhookSecret: githubWebhookSecret,
-		GitHubToken:         os.Getenv("GITHUB_TOKEN"),
-		AdminUsername:       adminUsername,
-		AdminPassword:       adminPassword,
-		JWTSecret:           jwtSecret,
-		DatabaseURL:         os.Getenv("DATABASE_URL"),
-		AuthEnvFallback:     authEnvFallback,
-		BootstrapAdmin:      bootstrapAdmin,
+		Port:                     port,
+		GitHubWebhookSecret:      githubWebhookSecret,
+		GitHubToken:              os.Getenv("GITHUB_TOKEN"),
+		AdminUsername:            adminUsername,
+		AdminPassword:            adminPassword,
+		JWTSecret:                jwtSecret,
+		DatabaseURL:              os.Getenv("DATABASE_URL"),
+		AuthEnvFallback:          authEnvFallback,
+		BootstrapAdmin:           bootstrapAdmin,
+		GitHubSyncIntervalMinute: githubSyncIntervalMinute,
 	}
+}
+
+func parseSyncIntervalMinutes(raw string) int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	v := 0
+	for _, ch := range raw {
+		if ch < '0' || ch > '9' {
+			return 0
+		}
+		v = v*10 + int(ch-'0')
+		if v > 1440 {
+			return 1440
+		}
+	}
+	if v < 0 {
+		return 0
+	}
+	return v
 }
 
 func getenvOrDefault(key, fallback string) string {

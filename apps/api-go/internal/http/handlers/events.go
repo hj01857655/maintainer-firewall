@@ -55,42 +55,25 @@ func (h *EventsHandler) List(c *gin.Context) {
 		defer cancel()
 
 		if syncEnabled {
-			if h.Store == nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "message": "event store is not configured"})
-				return
-			}
-			events, err := h.GitHubProvider.ListRecentEvents(ctx)
+			saved, total, err := h.SyncGitHubEvents(ctx)
 			if err != nil {
 				status := http.StatusBadGateway
 				errMsg := strings.ToLower(err.Error())
 				if strings.Contains(errMsg, "not configured") {
 					status = http.StatusInternalServerError
 				}
-				c.JSON(status, gin.H{"ok": false, "message": fmt.Sprintf("sync github events failed: %v", err)})
-				return
-			}
-			saved := 0
-			for _, evt := range events {
-				saveErr := h.Store.SaveEvent(ctx, store.WebhookEvent{
-					DeliveryID:         evt.DeliveryID,
-					EventType:          evt.EventType,
-					Action:             evt.Action,
-					RepositoryFullName: evt.RepositoryFullName,
-					SenderLogin:        evt.SenderLogin,
-					PayloadJSON:        evt.PayloadJSON,
-				})
-				if saveErr != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "message": fmt.Sprintf("save github event failed: %v", saveErr)})
-					return
+				if strings.Contains(errMsg, "save github event failed") {
+					status = http.StatusInternalServerError
 				}
-				saved++
+				c.JSON(status, gin.H{"ok": false, "message": err.Error()})
+				return
 			}
 			c.JSON(http.StatusOK, gin.H{
 				"ok":     true,
 				"source": "github",
 				"sync":   true,
 				"saved":  saved,
-				"total":  len(events),
+				"total":  total,
 			})
 			return
 		}
@@ -152,6 +135,35 @@ func (h *EventsHandler) List(c *gin.Context) {
 		EventType: eventType,
 		Action:    action,
 	})
+}
+
+func (h *EventsHandler) SyncGitHubEvents(ctx context.Context) (int, int, error) {
+	if h.GitHubProvider == nil {
+		return 0, 0, fmt.Errorf("github provider is not configured")
+	}
+	if h.Store == nil {
+		return 0, 0, fmt.Errorf("event store is not configured")
+	}
+	events, err := h.GitHubProvider.ListRecentEvents(ctx)
+	if err != nil {
+		return 0, 0, fmt.Errorf("sync github events failed: %w", err)
+	}
+	saved := 0
+	for _, evt := range events {
+		saveErr := h.Store.SaveEvent(ctx, store.WebhookEvent{
+			DeliveryID:         evt.DeliveryID,
+			EventType:          evt.EventType,
+			Action:             evt.Action,
+			RepositoryFullName: evt.RepositoryFullName,
+			SenderLogin:        evt.SenderLogin,
+			PayloadJSON:        evt.PayloadJSON,
+		})
+		if saveErr != nil {
+			return saved, len(events), fmt.Errorf("save github event failed: %w", saveErr)
+		}
+		saved++
+	}
+	return saved, len(events), nil
 }
 
 func parseIntOrDefault(v string, fallback int) int {

@@ -44,6 +44,11 @@ func main() {
 	webhookHandler.ActionExecutor = githubExecutor
 	actionFailureRetryHandler := handlers.NewActionFailureRetryHandler(eventStore, githubExecutor)
 	eventsHandler := handlers.NewEventsHandler(eventStore, githubExecutor)
+	if cfg.GitHubSyncIntervalMinute > 0 {
+		interval := time.Duration(cfg.GitHubSyncIntervalMinute) * time.Minute
+		service.StartGitHubEventsSyncWorker(context.Background(), interval, eventsHandler.SyncGitHubEvents)
+		log.Printf("github events sync worker enabled: interval=%s", interval)
+	}
 	alertsHandler := handlers.NewAlertsHandler(eventStore)
 	rulesHandler := handlers.NewRulesHandler(eventStore)
 	observabilityHandler := handlers.NewObservabilityHandler(eventStore, handlers.RuntimeConfigStatus{

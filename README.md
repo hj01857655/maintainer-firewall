@@ -40,6 +40,7 @@ Local defaults when omitted (development only):
 - GITHUB_WEBHOOK_SECRET=dev-webhook-secret
 - GITHUB_TOKEN is optional (empty by default)
 - DATABASE_URL is still required (set in `.env`/environment; if omitted, API starts but store initialization will fail)
+- `GITHUB_EVENTS_SYNC_INTERVAL_MINUTES` controls periodic GitHub event sync (`0`=disabled, `5`=every 5 minutes)
 
 
 API endpoints:
@@ -49,6 +50,10 @@ API endpoints:
 - `POST http://localhost:8080/webhook/github`
 - `GET http://localhost:8080/events?limit=20&offset=0&event_type=issues&action=opened` (auth required)
   - response includes `total` for pagination
+- `GET http://localhost:8080/events?source=github` (auth required)
+  - pull current GitHub user recent events and return unique `event_types`
+- `GET http://localhost:8080/events?source=github&sync=true` (auth required)
+  - pull current GitHub user recent events and sync into `webhook_events`
 - `GET http://localhost:8080/alerts?limit=20&offset=0&event_type=issues&action=opened&suggestion_type=label` (auth required)
   - response includes `total` for pagination
 - `GET/POST http://localhost:8080/rules` (auth required)
@@ -164,6 +169,7 @@ Invoke-RestMethod "http://localhost:8080/audit-logs?limit=20&offset=0" -Headers 
 - Configurable rules API (`GET/POST /rules`, `PATCH /rules/:id/active`)
 - Auto execute GitHub actions (label/comment)
 - Action retry + failure recording (`webhook_action_failures`) + retry API
+- `/events` GitHub source mode (`source=github`) + on-demand sync (`sync=true`) + periodic sync worker
 - Login + protected API/UI routes (JWT)
 - Query alerts/events with pagination/filter + `total`
 - Failures/audit/metrics/config APIs
@@ -172,7 +178,7 @@ Invoke-RestMethod "http://localhost:8080/audit-logs?limit=20&offset=0" -Headers 
 
 ## Secondary (next)
 
-- Auto bootstrap first DB admin user (reduce manual setup)
+- Sync status API (last success/failed reason/count)
 - Dashboard alert summary widgets
 - Rich filters (repository/sender/date range)
 - Export & reporting

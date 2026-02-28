@@ -18,6 +18,7 @@ func TestLoad_UsesDevDefaultsWhenEnvMissing(t *testing.T) {
 	t.Setenv("DATABASE_URL", "")
 	t.Setenv("AUTH_ENV_FALLBACK", "")
 	t.Setenv("BOOTSTRAP_ADMIN_ON_START", "")
+	t.Setenv("GITHUB_EVENTS_SYNC_INTERVAL_MINUTES", "")
 	t.Setenv("BREEZELL_TEST_DOTENV_CONTENT", "")
 	t.Setenv("BREEZELL_TEST_DOTENV_PATH", filepath.Join(t.TempDir(), "not-found.env"))
 
@@ -47,6 +48,9 @@ func TestLoad_UsesDevDefaultsWhenEnvMissing(t *testing.T) {
 	if !cfg.BootstrapAdmin {
 		t.Fatalf("expected default BOOTSTRAP_ADMIN_ON_START=true")
 	}
+	if cfg.GitHubSyncIntervalMinute != 0 {
+		t.Fatalf("expected default GITHUB_EVENTS_SYNC_INTERVAL_MINUTES=0, got %d", cfg.GitHubSyncIntervalMinute)
+	}
 }
 
 func TestLoad_BootstrapAdminFalse(t *testing.T) {
@@ -68,6 +72,17 @@ func TestLoad_AuthEnvFallbackFalse(t *testing.T) {
 	cfg := Load()
 	if cfg.AuthEnvFallback {
 		t.Fatalf("expected AUTH_ENV_FALLBACK=false")
+	}
+}
+
+func TestLoad_GitHubSyncInterval(t *testing.T) {
+	t.Setenv("GITHUB_EVENTS_SYNC_INTERVAL_MINUTES", "5")
+	t.Setenv("BREEZELL_TEST_DOTENV_CONTENT", "")
+	t.Setenv("BREEZELL_TEST_DOTENV_PATH", filepath.Join(t.TempDir(), "not-found.env"))
+
+	cfg := Load()
+	if cfg.GitHubSyncIntervalMinute != 5 {
+		t.Fatalf("expected GITHUB_EVENTS_SYNC_INTERVAL_MINUTES=5, got %d", cfg.GitHubSyncIntervalMinute)
 	}
 }
 
@@ -94,8 +109,9 @@ func TestLoad_UsesDotenvWhenEnvMissing(t *testing.T) {
 	t.Setenv("DATABASE_URL", "")
 	t.Setenv("AUTH_ENV_FALLBACK", "")
 	t.Setenv("BOOTSTRAP_ADMIN_ON_START", "")
+	t.Setenv("GITHUB_EVENTS_SYNC_INTERVAL_MINUTES", "")
 
-	t.Setenv("BREEZELL_TEST_DOTENV_CONTENT", "DATABASE_URL=mysql://dotenv-user:dotenv-pass@127.0.0.1:3306/dotenv_db\nADMIN_USERNAME=dotenv-admin\nJWT_SECRET=dotenv-jwt\nAUTH_ENV_FALLBACK=false\nBOOTSTRAP_ADMIN_ON_START=false")
+	t.Setenv("BREEZELL_TEST_DOTENV_CONTENT", "DATABASE_URL=mysql://dotenv-user:dotenv-pass@127.0.0.1:3306/dotenv_db\nADMIN_USERNAME=dotenv-admin\nJWT_SECRET=dotenv-jwt\nAUTH_ENV_FALLBACK=false\nBOOTSTRAP_ADMIN_ON_START=false\nGITHUB_EVENTS_SYNC_INTERVAL_MINUTES=15")
 	t.Setenv("BREEZELL_TEST_DOTENV_PATH", "")
 
 	cfg := Load()
@@ -113,6 +129,9 @@ func TestLoad_UsesDotenvWhenEnvMissing(t *testing.T) {
 	}
 	if cfg.BootstrapAdmin {
 		t.Fatalf("expected BOOTSTRAP_ADMIN_ON_START from dotenv to be false")
+	}
+	if cfg.GitHubSyncIntervalMinute != 15 {
+		t.Fatalf("expected GITHUB_EVENTS_SYNC_INTERVAL_MINUTES from dotenv to be 15, got %d", cfg.GitHubSyncIntervalMinute)
 	}
 }
 

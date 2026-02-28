@@ -272,3 +272,36 @@ func TestEventsList_SourceGitHub_SyncTrue_StoreNotConfigured(t *testing.T) {
 		t.Fatalf("expected status 500, got %d, body=%s", w.Code, w.Body.String())
 	}
 }
+
+func TestEventsSyncGitHubEvents_Success(t *testing.T) {
+	mockStore := &mockEventsStore{}
+	githubProvider := &mockGitHubEventTypesProvider{events: []service.GitHubUserEvent{
+		{DeliveryID: "gh-1", EventType: "IssuesEvent", Action: "opened", RepositoryFullName: "a/b", SenderLogin: "alice", PayloadJSON: []byte(`{"id":"1"}`)},
+		{DeliveryID: "gh-2", EventType: "PushEvent", Action: "unknown", RepositoryFullName: "a/b", SenderLogin: "alice", PayloadJSON: []byte(`{"id":"2"}`)},
+	}}
+	h := NewEventsHandler(mockStore, githubProvider)
+
+	saved, total, err := h.SyncGitHubEvents(context.Background())
+	if err != nil {
+		t.Fatalf("sync github events failed: %v", err)
+	}
+	if total != 2 || saved != 2 {
+		t.Fatalf("expected total=2 saved=2, got total=%d saved=%d", total, saved)
+	}
+}
+
+func TestEventsSyncGitHubEvents_ProviderError(t *testing.T) {
+	h := NewEventsHandler(&mockEventsStore{}, &mockGitHubEventTypesProvider{err: errors.New("boom")})
+	_, _, err := h.SyncGitHubEvents(context.Background())
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+}
+
+func TestEventsSyncGitHubEvents_StoreNotConfigured(t *testing.T) {
+	h := NewEventsHandler(nil, &mockGitHubEventTypesProvider{events: []service.GitHubUserEvent{}})
+	_, _, err := h.SyncGitHubEvents(context.Background())
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+}
