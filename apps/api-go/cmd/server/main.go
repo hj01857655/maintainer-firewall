@@ -27,14 +27,19 @@ func main() {
 	eventsHandler := handlers.NewEventsHandler(eventStore)
 	alertsHandler := handlers.NewAlertsHandler(eventStore)
 	rulesHandler := handlers.NewRulesHandler(eventStore)
+	authHandler := handlers.NewAuthHandler(cfg.AdminUsername, cfg.AdminPassword, cfg.AccessToken)
 
 	r := gin.Default()
 	r.GET("/health", handlers.Health)
-	r.GET("/events", eventsHandler.List)
-	r.GET("/alerts", alertsHandler.List)
-	r.GET("/rules", rulesHandler.List)
-	r.POST("/rules", rulesHandler.Create)
+	r.POST("/auth/login", authHandler.Login)
 	r.POST("/webhook/github", webhookHandler.GitHub)
+
+	api := r.Group("/")
+	api.Use(handlers.AuthMiddleware(cfg.AccessToken))
+	api.GET("/events", eventsHandler.List)
+	api.GET("/alerts", alertsHandler.List)
+	api.GET("/rules", rulesHandler.List)
+	api.POST("/rules", rulesHandler.Create)
 
 	addr := fmt.Sprintf(":%s", cfg.Port)
 	if err := r.Run(addr); err != nil {

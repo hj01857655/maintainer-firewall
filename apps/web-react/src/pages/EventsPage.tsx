@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react'
 import { useEffect, useMemo, useState } from 'react'
+import { authHeaders } from '../auth'
 
 type EventItem = {
   id: number
@@ -35,9 +36,9 @@ export function EventsPage() {
     if (eventTypeFilter) params.set('event_type', eventTypeFilter)
     if (actionFilter) params.set('action', actionFilter)
 
-    fetch(`/events?${params.toString()}`)
+    fetch(`/events?${params.toString()}`, { headers: authHeaders() })
       .then((r) => {
-        if (!r.ok) throw new Error(`events HTTP ${r.status}`)
+
         return r.json()
       })
       .then((data: EventsResponse) => {

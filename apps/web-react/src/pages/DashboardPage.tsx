@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react'
 import { useEffect, useState } from 'react'
+import { authHeaders } from '../auth'
 
 type Health = {
   status: string
@@ -11,9 +12,9 @@ export function DashboardPage() {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    fetch('/health')
+    fetch('/health', { headers: authHeaders() })
       .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+
         return r.json()
       })
       .then((data: Health) => setHealth(data))

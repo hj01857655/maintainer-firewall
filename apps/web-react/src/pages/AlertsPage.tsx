@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react'
 import { useEffect, useMemo, useState } from 'react'
+import { authHeaders } from '../auth'
 
 type AlertItem = {
   delivery_id: string
@@ -41,9 +42,9 @@ export function AlertsPage() {
     if (actionFilter) params.set('action', actionFilter)
     if (suggestionTypeFilter) params.set('suggestion_type', suggestionTypeFilter)
 
-    fetch(`/alerts?${params.toString()}`)
+    fetch(`/alerts?${params.toString()}`, { headers: authHeaders() })
       .then((r) => {
-        if (!r.ok) throw new Error(`alerts HTTP ${r.status}`)
+
         return r.json()
       })
       .then((data: AlertsResponse) => {
