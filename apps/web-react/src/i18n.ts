@@ -227,6 +227,12 @@ const resources = {
         zhCN: '中文',
         en: 'English',
       },
+      theme: {
+        label: '主题',
+        light: '浅色',
+        dark: '深色',
+        system: '跟随系统',
+      },
     },
   },
   en: {
@@ -452,6 +458,12 @@ const resources = {
         label: 'Language',
         zhCN: '中文',
         en: 'English',
+      },
+      theme: {
+        label: 'Theme',
+        light: 'Light',
+        dark: 'Dark',
+        system: 'System',
       },
     },
   },

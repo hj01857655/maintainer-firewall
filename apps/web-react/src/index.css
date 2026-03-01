@@ -6,6 +6,11 @@
   background-color: #f8fafc;
 }
 
+html.dark {
+  color: #e2e8f0;
+  background-color: #0f172a;
+}
+
 #root {
   min-height: 100vh;
 }
@@ -28,6 +33,114 @@ body {
   background: #f8fafc;
 }
 
+html.dark body {
+  background: #0f172a;
+}
+
+/* dark-mode utility bridge: keep existing pages readable without rewriting every component */
+html.dark .bg-white,
+html.dark .bg-white\/95 {
+  background-color: rgba(15, 23, 42, 0.95) !important;
+}
+
+html.dark .bg-slate-50,
+html.dark .bg-slate-100,
+html.dark [class*='bg-slate-50/'],
+html.dark [class*='bg-slate-100/'] {
+  background-color: rgba(30, 41, 59, 0.72) !important;
+}
+
+html.dark .text-slate-900 {
+  color: #f1f5f9 !important;
+}
+
+html.dark .text-slate-800,
+html.dark .text-slate-700 {
+  color: #e2e8f0 !important;
+}
+
+html.dark .text-slate-600 {
+  color: #cbd5e1 !important;
+}
+
+html.dark .text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+html.dark .border-slate-200 {
+  border-color: #334155 !important;
+}
+
+html.dark .border-slate-300 {
+  border-color: #475569 !important;
+}
+
+html.dark [class*='placeholder:text-slate-400']::placeholder {
+  color: #94a3b8 !important;
+}
+
+html.dark [class*='hover:bg-slate-50']:hover,
+html.dark [class*='hover:bg-slate-100']:hover {
+  background-color: rgba(51, 65, 85, 0.72) !important;
+}
+
+html.dark .bg-red-50 {
+  background-color: rgba(127, 29, 29, 0.28) !important;
+}
+
+html.dark .bg-green-50 {
+  background-color: rgba(20, 83, 45, 0.28) !important;
+}
+
+html.dark .bg-amber-50 {
+  background-color: rgba(120, 53, 15, 0.28) !important;
+}
+
+html.dark .bg-blue-50,
+html.dark [class*='bg-blue-50/'] {
+  background-color: rgba(30, 58, 138, 0.28) !important;
+}
+
+html.dark .border-red-200 {
+  border-color: rgba(248, 113, 113, 0.42) !important;
+}
+
+html.dark .border-green-200 {
+  border-color: rgba(74, 222, 128, 0.42) !important;
+}
+
+html.dark .border-amber-200 {
+  border-color: rgba(251, 191, 36, 0.42) !important;
+}
+
+html.dark .border-blue-200,
+html.dark .border-blue-300 {
+  border-color: rgba(96, 165, 250, 0.42) !important;
+}
+
+html.dark .text-red-600,
+html.dark .text-red-700 {
+  color: #fca5a5 !important;
+}
+
+html.dark .text-green-700,
+html.dark .text-emerald-700 {
+  color: #86efac !important;
+}
+
+html.dark .text-amber-700 {
+  color: #fcd34d !important;
+}
+
+html.dark .text-blue-600,
+html.dark .text-blue-700 {
+  color: #93c5fd !important;
+}
+
+html.dark [class*='focus:ring-offset-2']:focus {
+  --tw-ring-offset-color: #0f172a;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -42,4 +155,8 @@ body {
 /* keep unknownAtRules checker quiet in some IDEs while Tailwind is active */
 :where(html) {
   color-scheme: light;
+}
+
+:where(html.dark) {
+  color-scheme: dark;
 }
