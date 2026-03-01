@@ -1,6 +1,6 @@
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from 'react'
 
-export type ThemeMode = 'light' | 'dark' | 'system'
+export type ThemeMode = 'light' | 'dark'
 export type ResolvedTheme = 'light' | 'dark'
 
 type ThemeContextValue = {
@@ -13,13 +13,8 @@ const STORAGE_KEY = 'mf_theme_mode'
 
 const ThemeContext = createContext<ThemeContextValue | null>(null)
 
-function getSystemTheme(): ResolvedTheme {
-  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return 'light'
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-}
-
 function resolveTheme(mode: ThemeMode): ResolvedTheme {
-  return mode === 'system' ? getSystemTheme() : mode
+  return mode
 }
 
 function applyTheme(mode: ThemeMode) {
@@ -31,10 +26,10 @@ function applyTheme(mode: ThemeMode) {
 }
 
 function getInitialMode(): ThemeMode {
-  if (typeof window === 'undefined') return 'system'
+  if (typeof window === 'undefined') return 'light'
   const v = window.localStorage.getItem(STORAGE_KEY)
-  if (v === 'light' || v === 'dark' || v === 'system') return v
-  return 'system'
+  if (v === 'light' || v === 'dark') return v
+  return 'light'
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
@@ -48,16 +43,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     } catch {
       // ignore storage errors
     }
-  }, [mode])
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
-    const media = window.matchMedia('(prefers-color-scheme: dark)')
-    const onChange = () => {
-      if (mode === 'system') applyTheme('system')
-    }
-    media.addEventListener('change', onChange)
-    return () => media.removeEventListener('change', onChange)
   }, [mode])
 
   const value = useMemo<ThemeContextValue>(

@@ -16,7 +16,9 @@ const resources = {
         failures: '失败队列',
         audit: '审计日志',
         systemConfig: '系统配置',
+        accountMenu: '账户菜单',
         logout: '退出登录',
+        logoutConfirm: '确定要退出登录吗？',
       },
       common: {
         loading: '加载中...',
@@ -28,6 +30,14 @@ const resources = {
         empty: '当前筛选条件下暂无数据',
         error: '错误: {{message}}',
         viewJson: '查看 JSON',
+        noData: '暂无数据',
+        noDataDescription: '当前没有匹配的数据，请尝试调整筛选条件或稍后查看。',
+        errorBoundary: {
+          title: '出错了',
+          description: '应用程序遇到了意外错误，请刷新页面重试。',
+          reload: '刷新页面',
+          details: '查看错误详情',
+        },
       },
       login: {
         title: '登录控制台',
@@ -53,6 +63,7 @@ const resources = {
         },
         trendTitle: '24小时趋势',
         noTrendData: '暂无趋势数据',
+        noTrendDataDescription: '还没有足够的监控数据来生成趋势图。请稍后查看或检查数据源配置。',
         legend: {
           events: '事件',
           alerts: '告警',
@@ -179,6 +190,36 @@ const resources = {
         saved: '配置已保存',
         restartRequired: '配置已保存，请重启后端服务以完全生效。',
       },
+      guide: {
+        title: '接入指南',
+        subtitle: '快速了解如何配置和使用 Maintainer Firewall。',
+        quickStart: {
+          title: '快速开始',
+          step1: '配置 GITHUB_TOKEN 以启用 GitHub API 功能',
+          step2: '设置 webhook URL 指向本服务的事件接收端点',
+          step3: '在 GitHub 仓库设置中添加 webhook',
+          step4: '创建规则以自动化处理特定事件',
+          step5: '监控仪表盘和告警，优化规则配置',
+        },
+        cards: {
+          rules: {
+            title: '规则管理',
+            desc: '创建和编辑事件匹配规则，控制自动化行为。',
+          },
+          events: {
+            title: '事件流',
+            desc: '查看 GitHub webhook 事件，支持按类型筛选。',
+          },
+          alerts: {
+            title: '告警中心',
+            desc: '查看规则命中后的建议操作和处理原因。',
+          },
+          failures: {
+            title: '失败队列',
+            desc: '监控自动化动作执行失败，支持重试操作。',
+          },
+        },
+      },
       rules: {
         title: '规则',
         subtitle: '管理事件匹配规则并控制是否生效。',
@@ -248,7 +289,9 @@ const resources = {
         failures: 'Failures',
         audit: 'Audit Logs',
         systemConfig: 'System Config',
+        accountMenu: 'Account Menu',
         logout: 'Logout',
+        logoutConfirm: 'Are you sure you want to sign out?',
       },
       common: {
         loading: 'Loading...',
@@ -260,6 +303,14 @@ const resources = {
         empty: 'No data matched current filters',
         error: 'Error: {{message}}',
         viewJson: 'View JSON',
+        noData: 'No Data',
+        noDataDescription: 'No data matches the current criteria. Try adjusting filters or check back later.',
+        errorBoundary: {
+          title: 'Something went wrong',
+          description: 'The application encountered an unexpected error. Please refresh the page.',
+          reload: 'Refresh Page',
+          details: 'View error details',
+        },
       },
       login: {
         title: 'Login Console',
@@ -285,6 +336,7 @@ const resources = {
         },
         trendTitle: '24h Trend',
         noTrendData: 'No trend data',
+        noTrendDataDescription: 'Not enough monitoring data yet to generate trends. Check back later or verify data source configuration.',
         legend: {
           events: 'events',
           alerts: 'alerts',
@@ -410,6 +462,36 @@ const resources = {
         saving: 'Saving...',
         saved: 'Config saved',
         restartRequired: 'Config saved. Restart backend service to fully apply changes.',
+      },
+      guide: {
+        title: 'Guide',
+        subtitle: 'Learn how to configure and use Maintainer Firewall quickly.',
+        quickStart: {
+          title: 'Quick Start',
+          step1: 'Configure GITHUB_TOKEN to enable GitHub API features',
+          step2: 'Set webhook URL to point to this service\'s event endpoint',
+          step3: 'Add webhook in GitHub repository settings',
+          step4: 'Create rules to automate specific event handling',
+          step5: 'Monitor dashboard and alerts to optimize rule configuration',
+        },
+        cards: {
+          rules: {
+            title: 'Rule Management',
+            desc: 'Create and edit event matching rules to control automated behavior.',
+          },
+          events: {
+            title: 'Event Stream',
+            desc: 'View GitHub webhook events with type filtering support.',
+          },
+          alerts: {
+            title: 'Alert Center',
+            desc: 'Review suggested actions and reasons after rule matches.',
+          },
+          failures: {
+            title: 'Failure Queue',
+            desc: 'Monitor failed automated actions with retry support.',
+          },
+        },
       },
       rules: {
         title: 'Rules',
