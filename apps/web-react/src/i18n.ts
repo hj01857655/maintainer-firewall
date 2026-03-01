@@ -2,7 +2,15 @@ import i18n from 'i18next'
 import LanguageDetector from 'i18next-browser-languagedetector'
 import { initReactI18next } from 'react-i18next'
 
-const resources = {
+interface TranslationResources {
+  [key: string]: {
+    translation: {
+      [key: string]: any
+    }
+  }
+}
+
+const resources: TranslationResources = {
   'zh-CN': {
     translation: {
       brand: 'Maintainer Firewall',
@@ -15,6 +23,8 @@ const resources = {
         rules: '规则',
         failures: '失败队列',
         audit: '审计日志',
+        users: '用户管理',
+        analytics: '统计分析',
         systemConfig: '系统配置',
         accountMenu: '账户菜单',
         logout: '退出登录',
@@ -22,6 +32,14 @@ const resources = {
       },
       common: {
         loading: '加载中...',
+        cancel: '取消',
+        create: '创建',
+        edit: '编辑',
+        delete: '删除',
+        update: '更新',
+        actions: '操作',
+        creating: '创建中...',
+        updating: '更新中...',
         applyFilters: '应用筛选',
         prev: '上一页',
         next: '下一页',
@@ -263,16 +281,97 @@ const resources = {
           inactive: '已停用',
         },
       },
-      lang: {
-        label: '语言',
-        zhCN: '中文',
-        en: 'English',
+      users: {
+        title: '用户管理',
+        description: '管理管理员用户账号、角色和权限设置。',
+        createUser: '创建用户',
+        editUser: '编辑用户',
+        changePassword: '修改密码',
+        username: '用户名',
+        password: '密码',
+        role: '角色',
+        permissionsLabel: '权限',
+        active: '激活状态',
+        lastLogin: '最后登录',
+        status: {
+          active: '活跃',
+          inactive: '停用',
+        },
+        roles: {
+          admin: '管理员',
+          editor: '编辑者',
+          viewer: '查看者',
+        },
+        permissions: {
+          read: '读取',
+          write: '写入',
+          admin: '管理',
+        },
+        createUserModal: {
+          title: '创建新用户',
+          submit: '创建用户',
+          creating: '创建中...',
+        },
+        editUserModal: {
+          title: '编辑用户',
+          submit: '更新用户',
+          updating: '更新中...',
+        },
+        changePasswordModal: {
+          title: '修改密码',
+          currentPassword: '当前密码',
+          newPassword: '新密码',
+          currentPasswordPlaceholder: '请输入当前密码',
+          newPasswordPlaceholder: '请输入新密码',
+          submit: '修改密码',
+          updating: '修改中...',
+        },
+        actions: {
+          activate: '激活',
+          deactivate: '停用',
+          edit: '编辑',
+          delete: '删除',
+          changePassword: '改密',
+        },
+        confirmDelete: '确定要删除用户 "{{username}}" 吗？此操作无法撤销。',
+        noUsers: '暂无用户',
+        usernamePlaceholder: '请输入用户名',
+        passwordPlaceholder: '请输入密码',
+        never: '从未登录',
       },
-      theme: {
-        label: '主题',
-        light: '浅色',
-        dark: '深色',
-        system: '跟随系统',
+      analytics: {
+        title: '统计分析',
+        description: '深入分析系统运行数据和性能指标。',
+        timeRange: {
+          label: '时间范围',
+          '24h': '24小时',
+          '7d': '7天',
+          '30d': '30天',
+        },
+        metrics: {
+          events: '事件数',
+          alerts: '告警数',
+          failures: '失败数',
+          successRate: '成功率',
+        },
+        charts: {
+          trend: '趋势图表',
+          performance: '性能指标',
+          detailedData: '详细数据',
+        },
+        performance: {
+          p95Latency: 'P95延迟',
+          avgProcessing: '平均处理时间',
+          uptime: '正常运行时间',
+          throughput: '吞吐量',
+        },
+        table: {
+          time: '时间',
+          events: '事件',
+          alerts: '告警',
+          failures: '失败',
+        },
+        noData: '暂无数据',
       },
     },
   },
@@ -288,13 +387,23 @@ const resources = {
         rules: 'Rules',
         failures: 'Failures',
         audit: 'Audit Logs',
+        users: 'User Management',
+        analytics: 'Analytics',
         systemConfig: 'System Config',
         accountMenu: 'Account Menu',
         logout: 'Logout',
-        logoutConfirm: 'Are you sure you want to sign out?',
+        logoutConfirm: 'Are you sure you want to logout?',
       },
       common: {
         loading: 'Loading...',
+        cancel: 'Cancel',
+        create: 'Create',
+        edit: 'Edit',
+        delete: 'Delete',
+        update: 'Update',
+        actions: 'Actions',
+        creating: 'Creating...',
+        updating: 'Updating...',
         applyFilters: 'Apply Filters',
         prev: 'Prev',
         next: 'Next',
@@ -536,23 +645,104 @@ const resources = {
           inactive: 'Inactive',
         },
       },
-      lang: {
-        label: 'Language',
-        zhCN: '中文',
-        en: 'English',
+      users: {
+        title: 'User Management',
+        description: 'Manage admin user accounts, roles and permissions.',
+        createUser: 'Create User',
+        editUser: 'Edit User',
+        changePassword: 'Change Password',
+        username: 'Username',
+        password: 'Password',
+        role: 'Role',
+        permissionsLabel: 'Permissions',
+        active: 'Active Status',
+        lastLogin: 'Last Login',
+        status: {
+          active: 'Active',
+          inactive: 'Inactive',
+        },
+        roles: {
+          admin: 'Administrator',
+          editor: 'Editor',
+          viewer: 'Viewer',
+        },
+        permissions: {
+          read: 'Read',
+          write: 'Write',
+          admin: 'Admin',
+        },
+        createUserModal: {
+          title: 'Create New User',
+          submit: 'Create User',
+          creating: 'Creating...',
+        },
+        editUserModal: {
+          title: 'Edit User',
+          submit: 'Update User',
+          updating: 'Updating...',
+        },
+        changePasswordModal: {
+          title: 'Change Password',
+          currentPassword: 'Current Password',
+          newPassword: 'New Password',
+          currentPasswordPlaceholder: 'Enter current password',
+          newPasswordPlaceholder: 'Enter new password',
+          submit: 'Change Password',
+          updating: 'Updating...',
+        },
+        actions: {
+          activate: 'Activate',
+          deactivate: 'Deactivate',
+          edit: 'Edit',
+          delete: 'Delete',
+          changePassword: 'Change Password',
+        },
+        confirmDelete: 'Are you sure you want to delete user "{{username}}"? This action cannot be undone.',
+        noUsers: 'No users found',
+        usernamePlaceholder: 'Enter username',
+        passwordPlaceholder: 'Enter password',
+        never: 'Never logged in',
       },
-      theme: {
-        label: 'Theme',
-        light: 'Light',
-        dark: 'Dark',
-        system: 'System',
+      analytics: {
+        title: 'Analytics',
+        description: 'Deep analysis of system operation data and performance metrics.',
+        timeRange: {
+          label: 'Time Range',
+          '24h': '24 hours',
+          '7d': '7 days',
+          '30d': '30 days',
+        },
+        metrics: {
+          events: 'Events',
+          alerts: 'Alerts',
+          failures: 'Failures',
+          successRate: 'Success Rate',
+        },
+        charts: {
+          trend: 'Trend Chart',
+          performance: 'Performance Metrics',
+          detailedData: 'Detailed Data',
+        },
+        performance: {
+          p95Latency: 'P95 Latency',
+          avgProcessing: 'Avg Processing Time',
+          uptime: 'Uptime',
+          throughput: 'Throughput',
+        },
+        table: {
+          time: 'Time',
+          events: 'Events',
+          alerts: 'Alerts',
+          failures: 'Failures',
+        },
+        noData: 'No data available',
       },
     },
   },
 }
 
 i18n
-  .use(LanguageDetector)
+
   .use(initReactI18next)
   .init({
     resources,
@@ -566,7 +756,7 @@ i18n
       caches: ['localStorage'],
       lookupLocalStorage: 'mf_lang',
     },
-  })
+  });
 
-export default i18n
+export default i18n;
 
