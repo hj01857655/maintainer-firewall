@@ -1,4 +1,4 @@
-import { createContext, createElement, type ReactNode, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from 'react'
 
 export type ThemeMode = 'light' | 'dark' | 'system'
 export type ResolvedTheme = 'light' | 'dark'
@@ -65,7 +65,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     [mode, resolved],
   )
 
-  return createElement(ThemeContext.Provider, { value }, children)
+  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
 }
 
 export function useTheme() {
@@ -79,4 +79,3 @@ export function useTheme() {
 export function initTheme() {
   applyTheme(getInitialMode())
 }
-
