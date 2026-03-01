@@ -48,6 +48,19 @@ type SyncTriggerResponse = {
   message?: string
 }
 
+type EventFilterOptions = {
+  event_types: string[]
+  actions: string[]
+  repositories: string[]
+  senders: string[]
+}
+
+type EventFilterOptionsResponse = {
+  ok: boolean
+  options: EventFilterOptions
+  message?: string
+}
+
 function toRepoUrl(evt: EventItem): string | null {
   const raw = (evt.payload_json ?? {}) as Record<string, unknown>
   const repository = raw.repository as Record<string, unknown> | undefined
@@ -145,6 +158,7 @@ export function EventsPage() {
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null)
   const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState('')
+  const [filterOptions, setFilterOptions] = useState<EventFilterOptions>({ event_types: [], actions: [], repositories: [], senders: [] })
   const limit = 20
 
   function reloadEvents(nextOffset = offset) {
@@ -190,36 +204,46 @@ export function EventsPage() {
   }, [eventTypeFilter, actionFilter, offset])
 
   useEffect(() => {
+    apiFetch('/api/events/filter-options')
+      .then(async (r) => {
+        if (!r.ok) {
+          const body = await r.text()
+          throw new Error(`events filter-options HTTP ${r.status} ${body}`.trim())
+        }
+        return r.json() as Promise<EventFilterOptionsResponse>
+      })
+      .then((data) => {
+        if (!data.ok) throw new Error(data.message || 'events filter options response not ok')
+        setFilterOptions(data.options)
+      })
+      .catch(() => {
+        // 不阻塞主列表加载，失败时回退到当前页去重选项
+      })
+
     loadSyncStatus()
     const timer = window.setInterval(loadSyncStatus, 10000)
     return () => window.clearInterval(timer)
   }, [])
 
   const eventTypeOptions = useMemo(() => {
-    const set = new Set<string>()
-    for (const evt of events) {
-      const v = evt.event_type?.trim()
-      if (v) set.add(v)
+    const base = filterOptions.event_types.length > 0
+      ? [...filterOptions.event_types]
+      : Array.from(new Set(events.map((evt) => evt.event_type?.trim()).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b))
+    if (eventTypeFilter && !base.includes(eventTypeFilter)) {
+      base.unshift(eventTypeFilter)
     }
-    const options = Array.from(set).sort((a, b) => a.localeCompare(b))
-    if (eventTypeFilter && !options.includes(eventTypeFilter)) {
-      options.unshift(eventTypeFilter)
-    }
-    return options
-  }, [events, eventTypeFilter])
+    return base
+  }, [filterOptions.event_types, events, eventTypeFilter])
 
   const actionOptions = useMemo(() => {
-    const set = new Set<string>()
-    for (const evt of events) {
-      const v = evt.action?.trim()
-      if (v) set.add(v)
+    const base = filterOptions.actions.length > 0
+      ? [...filterOptions.actions]
+      : Array.from(new Set(events.map((evt) => evt.action?.trim()).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b))
+    if (actionFilter && !base.includes(actionFilter)) {
+      base.unshift(actionFilter)
     }
-    const options = Array.from(set).sort((a, b) => a.localeCompare(b))
-    if (actionFilter && !options.includes(actionFilter)) {
-      options.unshift(actionFilter)
-    }
-    return options
-  }, [events, actionFilter])
+    return base
+  }, [filterOptions.actions, events, actionFilter])
 
   const currentPage = useMemo(() => Math.floor(offset / limit) + 1, [offset])
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / limit)), [total])

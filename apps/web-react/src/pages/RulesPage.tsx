@@ -21,6 +21,18 @@ type RulesResponse = {
   message?: string
 }
 
+type RuleFilterOptions = {
+  event_types: string[]
+  suggestion_types: string[]
+  active_states: string[]
+}
+
+type RuleFilterOptionsResponse = {
+  ok: boolean
+  options: RuleFilterOptions
+  message?: string
+}
+
 export function RulesPage() {
   const { t } = useTranslation()
   const [searchParams] = useSearchParams()
@@ -31,6 +43,7 @@ export function RulesPage() {
   const [activeOnly, setActiveOnly] = useState((searchParams.get('active_only') || 'true') === 'true')
   const [offset, setOffset] = useState(0)
   const [total, setTotal] = useState(0)
+  const [filterOptions, setFilterOptions] = useState<RuleFilterOptions>({ event_types: [], suggestion_types: [], active_states: [] })
   const [creating, setCreating] = useState(false)
   const [togglingId, setTogglingId] = useState<number | null>(null)
 
@@ -70,22 +83,37 @@ export function RulesPage() {
   }
 
   useEffect(() => {
+    fetch('/api/rules/filter-options', { headers: authHeaders() })
+      .then(async (r) => {
+        if (!r.ok) {
+          const body = await r.text()
+          throw new Error(`rules filter-options HTTP ${r.status} ${body}`.trim())
+        }
+        return r.json() as Promise<RuleFilterOptionsResponse>
+      })
+      .then((data) => {
+        if (!data.ok) throw new Error(data.message || 'rules filter options response not ok')
+        setFilterOptions(data.options)
+      })
+      .catch(() => {
+        // 不阻塞主列表加载，失败时回退到当前页去重选项
+      })
+  }, [])
+
+  useEffect(() => {
     reloadRules(offset)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [offset, eventTypeFilter, keywordFilter, activeOnly])
 
   const eventTypeOptions = useMemo(() => {
-    const set = new Set<string>()
-    for (const item of rules) {
-      const v = item.event_type?.trim()
-      if (v) set.add(v)
+    const base = filterOptions.event_types.length > 0
+      ? [...filterOptions.event_types]
+      : Array.from(new Set(rules.map((item) => item.event_type?.trim()).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b))
+    if (eventTypeFilter && !base.includes(eventTypeFilter)) {
+      base.unshift(eventTypeFilter)
     }
-    const options = Array.from(set).sort((a, b) => a.localeCompare(b))
-    if (eventTypeFilter && !options.includes(eventTypeFilter)) {
-      options.unshift(eventTypeFilter)
-    }
-    return options
-  }, [rules, eventTypeFilter])
+    return base
+  }, [filterOptions.event_types, rules, eventTypeFilter])
 
   const currentPage = useMemo(() => Math.floor(offset / limit) + 1, [offset])
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / limit)), [total])

@@ -23,6 +23,20 @@ type AlertsResponse = {
   message?: string
 }
 
+type AlertFilterOptions = {
+  event_types: string[]
+  actions: string[]
+  suggestion_types: string[]
+  repositories: string[]
+  senders: string[]
+}
+
+type AlertFilterOptionsResponse = {
+  ok: boolean
+  options: AlertFilterOptions
+  message?: string
+}
+
 export function AlertsPage() {
   const { t } = useTranslation()
   const [alerts, setAlerts] = useState<AlertItem[]>([])
@@ -32,7 +46,26 @@ export function AlertsPage() {
   const [suggestionTypeFilter, setSuggestionTypeFilter] = useState('')
   const [offset, setOffset] = useState(0)
   const [total, setTotal] = useState(0)
+  const [filterOptions, setFilterOptions] = useState<AlertFilterOptions>({ event_types: [], actions: [], suggestion_types: [], repositories: [], senders: [] })
   const limit = 20
+
+  useEffect(() => {
+    apiFetch('/api/alerts/filter-options')
+      .then(async (r) => {
+        if (!r.ok) {
+          const body = await r.text()
+          throw new Error(`alerts filter-options HTTP ${r.status} ${body}`.trim())
+        }
+        return r.json() as Promise<AlertFilterOptionsResponse>
+      })
+      .then((data) => {
+        if (!data.ok) throw new Error(data.message || 'alerts filter options response not ok')
+        setFilterOptions(data.options)
+      })
+      .catch(() => {
+        // 不阻塞主列表加载，失败时回退到当前页去重选项
+      })
+  }, [])
 
   useEffect(() => {
     const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
@@ -60,43 +93,34 @@ export function AlertsPage() {
 
 
   const eventTypeOptions = useMemo(() => {
-    const set = new Set<string>()
-    for (const item of alerts) {
-      const v = item.event_type?.trim()
-      if (v) set.add(v)
+    const base = filterOptions.event_types.length > 0
+      ? [...filterOptions.event_types]
+      : Array.from(new Set(alerts.map((item) => item.event_type?.trim()).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b))
+    if (eventTypeFilter && !base.includes(eventTypeFilter)) {
+      base.unshift(eventTypeFilter)
     }
-    const options = Array.from(set).sort((a, b) => a.localeCompare(b))
-    if (eventTypeFilter && !options.includes(eventTypeFilter)) {
-      options.unshift(eventTypeFilter)
-    }
-    return options
-  }, [alerts, eventTypeFilter])
+    return base
+  }, [filterOptions.event_types, alerts, eventTypeFilter])
 
   const actionOptions = useMemo(() => {
-    const set = new Set<string>()
-    for (const item of alerts) {
-      const v = item.action?.trim()
-      if (v) set.add(v)
+    const base = filterOptions.actions.length > 0
+      ? [...filterOptions.actions]
+      : Array.from(new Set(alerts.map((item) => item.action?.trim()).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b))
+    if (actionFilter && !base.includes(actionFilter)) {
+      base.unshift(actionFilter)
     }
-    const options = Array.from(set).sort((a, b) => a.localeCompare(b))
-    if (actionFilter && !options.includes(actionFilter)) {
-      options.unshift(actionFilter)
-    }
-    return options
-  }, [alerts, actionFilter])
+    return base
+  }, [filterOptions.actions, alerts, actionFilter])
 
   const suggestionTypeOptions = useMemo(() => {
-    const set = new Set<string>()
-    for (const item of alerts) {
-      const v = item.suggestion_type?.trim()
-      if (v) set.add(v)
+    const base = filterOptions.suggestion_types.length > 0
+      ? [...filterOptions.suggestion_types]
+      : Array.from(new Set(alerts.map((item) => item.suggestion_type?.trim()).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b))
+    if (suggestionTypeFilter && !base.includes(suggestionTypeFilter)) {
+      base.unshift(suggestionTypeFilter)
     }
-    const options = Array.from(set).sort((a, b) => a.localeCompare(b))
-    if (suggestionTypeFilter && !options.includes(suggestionTypeFilter)) {
-      options.unshift(suggestionTypeFilter)
-    }
-    return options
-  }, [alerts, suggestionTypeFilter])
+    return base
+  }, [filterOptions.suggestion_types, alerts, suggestionTypeFilter])
 
   const currentPage = useMemo(() => Math.floor(offset / limit) + 1, [offset])
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / limit)), [total])
