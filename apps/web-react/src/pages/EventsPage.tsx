@@ -9,6 +9,7 @@ type EventItem = {
   action: string
   repository_full_name: string
   sender_login: string
+  payload_json?: Record<string, unknown>
   received_at: string
 }
 
@@ -45,6 +46,92 @@ type SyncTriggerResponse = {
   saved: number
   total: number
   message?: string
+}
+
+function toRepoUrl(evt: EventItem): string | null {
+  const raw = (evt.payload_json ?? {}) as Record<string, unknown>
+  const repository = raw.repository as Record<string, unknown> | undefined
+  if (repository && typeof repository.html_url === 'string' && repository.html_url.trim()) {
+    return repository.html_url
+  }
+  const repo = raw.repo as Record<string, unknown> | undefined
+  if (repo && typeof repo.url === 'string' && repo.url.trim()) {
+    return repo.url.replace('https://api.github.com/repos/', 'https://github.com/')
+  }
+  if (evt.repository_full_name.includes('/')) {
+    return `https://github.com/${evt.repository_full_name}`
+  }
+  return null
+}
+
+function extractTarget(evt: EventItem): { label: string; url: string | null; summary: string } {
+  const raw = (evt.payload_json ?? {}) as Record<string, unknown>
+  const payload = (raw.payload as Record<string, unknown> | undefined) ?? raw
+
+  const issue = payload.issue as Record<string, unknown> | undefined
+  if (issue) {
+    const num = issue.number
+    const title = typeof issue.title === 'string' ? issue.title : ''
+    const body = typeof issue.body === 'string' ? issue.body : ''
+    const url = typeof issue.html_url === 'string' ? issue.html_url : null
+    return {
+      label: `Issue #${typeof num === 'number' ? num : '-'}`,
+      url,
+      summary: title || body || '-',
+    }
+  }
+
+  const pr = payload.pull_request as Record<string, unknown> | undefined
+  if (pr) {
+    const num = pr.number
+    const title = typeof pr.title === 'string' ? pr.title : ''
+    const body = typeof pr.body === 'string' ? pr.body : ''
+    const url = typeof pr.html_url === 'string' ? pr.html_url : null
+    return {
+      label: `PR #${typeof num === 'number' ? num : '-'}`,
+      url,
+      summary: title || body || '-',
+    }
+  }
+
+  const comment = payload.comment as Record<string, unknown> | undefined
+  if (comment) {
+    const body = typeof comment.body === 'string' ? comment.body : ''
+    const url = typeof comment.html_url === 'string' ? comment.html_url : null
+    return {
+      label: 'Comment',
+      url,
+      summary: body || '-',
+    }
+  }
+
+  const release = payload.release as Record<string, unknown> | undefined
+  if (release) {
+    const tagName = typeof release.tag_name === 'string' ? release.tag_name : ''
+    const name = typeof release.name === 'string' ? release.name : ''
+    const body = typeof release.body === 'string' ? release.body : ''
+    const url = typeof release.html_url === 'string' ? release.html_url : null
+    return {
+      label: tagName ? `Release ${tagName}` : 'Release',
+      url,
+      summary: name || body || '-',
+    }
+  }
+
+  const headCommit = payload.head_commit as Record<string, unknown> | undefined
+  if (headCommit && typeof headCommit.message === 'string' && headCommit.message.trim()) {
+    return {
+      label: evt.event_type,
+      url: null,
+      summary: headCommit.message,
+    }
+  }
+
+  return {
+    label: evt.event_type,
+    url: null,
+    summary: '-',
+  }
 }
 
 export function EventsPage() {
@@ -108,6 +195,32 @@ export function EventsPage() {
     return () => window.clearInterval(timer)
   }, [])
 
+  const eventTypeOptions = useMemo(() => {
+    const set = new Set<string>()
+    for (const evt of events) {
+      const v = evt.event_type?.trim()
+      if (v) set.add(v)
+    }
+    const options = Array.from(set).sort((a, b) => a.localeCompare(b))
+    if (eventTypeFilter && !options.includes(eventTypeFilter)) {
+      options.unshift(eventTypeFilter)
+    }
+    return options
+  }, [events, eventTypeFilter])
+
+  const actionOptions = useMemo(() => {
+    const set = new Set<string>()
+    for (const evt of events) {
+      const v = evt.action?.trim()
+      if (v) set.add(v)
+    }
+    const options = Array.from(set).sort((a, b) => a.localeCompare(b))
+    if (actionFilter && !options.includes(actionFilter)) {
+      options.unshift(actionFilter)
+    }
+    return options
+  }, [events, actionFilter])
+
   const currentPage = useMemo(() => Math.floor(offset / limit) + 1, [offset])
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / limit)), [total])
 
@@ -120,28 +233,38 @@ export function EventsPage() {
         <div className="mt-4 grid gap-3 md:grid-cols-3">
           <label className="block text-sm font-medium text-slate-700">
             <span>{t('events.filters.eventType')}</span>
-            <input
-              className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3 text-base text-slate-900 outline-none transition-colors duration-200 placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            <select
+              className="mt-2 h-11 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 outline-none transition-colors duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
               value={eventTypeFilter}
               onChange={(e) => {
                 setOffset(0)
                 setEventTypeFilter(e.target.value)
               }}
-              placeholder={t('events.filters.eventTypePlaceholder')}
-            />
+              aria-label={t('events.filters.eventType')}
+            >
+              <option value="">{t('common.all')}</option>
+              {eventTypeOptions.map((value) => (
+                <option key={value} value={value}>{value}</option>
+              ))}
+            </select>
           </label>
 
           <label className="block text-sm font-medium text-slate-700">
             <span>{t('events.filters.action')}</span>
-            <input
-              className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3 text-base text-slate-900 outline-none transition-colors duration-200 placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            <select
+              className="mt-2 h-11 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 outline-none transition-colors duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
               value={actionFilter}
               onChange={(e) => {
                 setOffset(0)
                 setActionFilter(e.target.value)
               }}
-              placeholder={t('events.filters.actionPlaceholder')}
-            />
+              aria-label={t('events.filters.action')}
+            >
+              <option value="">{t('common.all')}</option>
+              {actionOptions.map((value) => (
+                <option key={value} value={value}>{value}</option>
+              ))}
+            </select>
           </label>
 
           <div className="flex items-end">
@@ -208,28 +331,54 @@ export function EventsPage() {
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white/95 shadow-sm">
-        <table className="min-w-[760px] w-full text-sm">
+        <table className="min-w-[1080px] w-full text-sm">
           <thead className="bg-slate-50 text-slate-700">
             <tr>
               <th className="px-3 py-3 text-left font-semibold">{t('events.table.id')}</th>
               <th className="px-3 py-3 text-left font-semibold">{t('events.table.type')}</th>
               <th className="px-3 py-3 text-left font-semibold">{t('events.table.action')}</th>
               <th className="px-3 py-3 text-left font-semibold">{t('events.table.repository')}</th>
+              <th className="px-3 py-3 text-left font-semibold">{t('events.table.target')}</th>
+              <th className="px-3 py-3 text-left font-semibold">{t('events.table.summary')}</th>
               <th className="px-3 py-3 text-left font-semibold">{t('events.table.sender')}</th>
               <th className="px-3 py-3 text-left font-semibold">{t('events.table.receivedAt')}</th>
             </tr>
           </thead>
           <tbody>
-            {events.map((evt) => (
-              <tr key={evt.id} className="border-t border-slate-200 hover:bg-slate-50/80">
-                <td className="px-3 py-3 text-slate-900">{evt.id}</td>
-                <td className="px-3 py-3 text-slate-900">{evt.event_type}</td>
-                <td className="px-3 py-3 text-slate-900">{evt.action || '-'}</td>
-                <td className="px-3 py-3 text-slate-900">{evt.repository_full_name}</td>
-                <td className="px-3 py-3 text-slate-900">{evt.sender_login}</td>
-                <td className="px-3 py-3 text-slate-900">{new Date(evt.received_at).toLocaleString()}</td>
-              </tr>
-            ))}
+            {events.map((evt) => {
+              const repoUrl = toRepoUrl(evt)
+              const target = extractTarget(evt)
+              return (
+                <tr key={evt.id} className="border-t border-slate-200 hover:bg-slate-50/80">
+                  <td className="px-3 py-3 text-slate-900">{evt.id}</td>
+                  <td className="px-3 py-3 text-slate-900">{evt.event_type}</td>
+                  <td className="px-3 py-3 text-slate-900">{evt.action || '-'}</td>
+                  <td className="px-3 py-3 text-slate-900">
+                    {repoUrl ? (
+                      <a href={repoUrl} target="_blank" rel="noreferrer" className="cursor-pointer text-blue-600 transition-colors duration-200 hover:text-blue-700 hover:underline">
+                        {evt.repository_full_name}
+                      </a>
+                    ) : (
+                      evt.repository_full_name
+                    )}
+                  </td>
+                  <td className="px-3 py-3 text-slate-900">
+                    {target.url ? (
+                      <a href={target.url} target="_blank" rel="noreferrer" className="cursor-pointer text-blue-600 transition-colors duration-200 hover:text-blue-700 hover:underline">
+                        {target.label}
+                      </a>
+                    ) : (
+                      target.label
+                    )}
+                  </td>
+                  <td className="max-w-[420px] px-3 py-3 text-slate-900">
+                    <span className="line-clamp-2" title={target.summary}>{target.summary}</span>
+                  </td>
+                  <td className="px-3 py-3 text-slate-900">{evt.sender_login}</td>
+                  <td className="px-3 py-3 text-slate-900">{new Date(evt.received_at).toLocaleString()}</td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>

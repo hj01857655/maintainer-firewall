@@ -59,6 +59,45 @@ export function AlertsPage() {
 
 
 
+  const eventTypeOptions = useMemo(() => {
+    const set = new Set<string>()
+    for (const item of alerts) {
+      const v = item.event_type?.trim()
+      if (v) set.add(v)
+    }
+    const options = Array.from(set).sort((a, b) => a.localeCompare(b))
+    if (eventTypeFilter && !options.includes(eventTypeFilter)) {
+      options.unshift(eventTypeFilter)
+    }
+    return options
+  }, [alerts, eventTypeFilter])
+
+  const actionOptions = useMemo(() => {
+    const set = new Set<string>()
+    for (const item of alerts) {
+      const v = item.action?.trim()
+      if (v) set.add(v)
+    }
+    const options = Array.from(set).sort((a, b) => a.localeCompare(b))
+    if (actionFilter && !options.includes(actionFilter)) {
+      options.unshift(actionFilter)
+    }
+    return options
+  }, [alerts, actionFilter])
+
+  const suggestionTypeOptions = useMemo(() => {
+    const set = new Set<string>()
+    for (const item of alerts) {
+      const v = item.suggestion_type?.trim()
+      if (v) set.add(v)
+    }
+    const options = Array.from(set).sort((a, b) => a.localeCompare(b))
+    if (suggestionTypeFilter && !options.includes(suggestionTypeFilter)) {
+      options.unshift(suggestionTypeFilter)
+    }
+    return options
+  }, [alerts, suggestionTypeFilter])
+
   const currentPage = useMemo(() => Math.floor(offset / limit) + 1, [offset])
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / limit)), [total])
 
@@ -71,41 +110,56 @@ export function AlertsPage() {
         <div className="mt-4 grid gap-3 md:grid-cols-4">
           <label className="block text-sm font-medium text-slate-700">
             <span>{t('alerts.filters.eventType')}</span>
-            <input
-              className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3 text-base text-slate-900 outline-none transition-colors duration-200 placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            <select
+              className="mt-2 h-11 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 outline-none transition-colors duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
               value={eventTypeFilter}
               onChange={(e) => {
                 setOffset(0)
                 setEventTypeFilter(e.target.value)
               }}
-              placeholder={t('alerts.filters.eventTypePlaceholder')}
-            />
+              aria-label={t('alerts.filters.eventType')}
+            >
+              <option value="">{t('common.all')}</option>
+              {eventTypeOptions.map((value) => (
+                <option key={value} value={value}>{value}</option>
+              ))}
+            </select>
           </label>
 
           <label className="block text-sm font-medium text-slate-700">
             <span>{t('alerts.filters.action')}</span>
-            <input
-              className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3 text-base text-slate-900 outline-none transition-colors duration-200 placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            <select
+              className="mt-2 h-11 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 outline-none transition-colors duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
               value={actionFilter}
               onChange={(e) => {
                 setOffset(0)
                 setActionFilter(e.target.value)
               }}
-              placeholder={t('alerts.filters.actionPlaceholder')}
-            />
+              aria-label={t('alerts.filters.action')}
+            >
+              <option value="">{t('common.all')}</option>
+              {actionOptions.map((value) => (
+                <option key={value} value={value}>{value}</option>
+              ))}
+            </select>
           </label>
 
           <label className="block text-sm font-medium text-slate-700">
             <span>{t('alerts.filters.suggestionType')}</span>
-            <input
-              className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3 text-base text-slate-900 outline-none transition-colors duration-200 placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            <select
+              className="mt-2 h-11 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 outline-none transition-colors duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
               value={suggestionTypeFilter}
               onChange={(e) => {
                 setOffset(0)
                 setSuggestionTypeFilter(e.target.value)
               }}
-              placeholder={t('alerts.filters.suggestionTypePlaceholder')}
-            />
+              aria-label={t('alerts.filters.suggestionType')}
+            >
+              <option value="">{t('common.all')}</option>
+              {suggestionTypeOptions.map((value) => (
+                <option key={value} value={value}>{value}</option>
+              ))}
+            </select>
           </label>
 
           <div className="flex items-end">
