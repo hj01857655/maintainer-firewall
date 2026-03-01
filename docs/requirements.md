@@ -68,8 +68,11 @@ Build a self-hostable service that helps maintainers reduce noisy triage work an
 - React login page (`/login`)
 - Protected console routes (dashboard/events/rules/alerts/failures/audit/system-config)
 - Event list page with latest records and dynamic dropdown filters (`event_type`, `action`)
+  - options source: `GET /events/filter-options`
 - Rules page with status toggle and dynamic dropdown filter (`event_type`)
+  - options source: `GET /rules/filter-options`
 - Alerts list page with latest records and dynamic dropdown filters (`event_type`, `action`, `suggestion_type`)
+  - options source: `GET /alerts/filter-options`
 - Failures page with retry actions and status hints
 - Audit logs page with filters
 - System config page for runtime env update
@@ -80,10 +83,12 @@ Build a self-hostable service that helps maintainers reduce noisy triage work an
 - Provide protected rules API:
   - `GET /rules`
   - `POST /rules`
+  - `GET /rules/filter-options` (full-dataset dropdown options)
 
 ### FR-6 Alert Persistence and Query
 - Persist matched rule hits into alert records
 - Provide protected `GET /alerts` with pagination/filter/total
+- Provide protected `GET /alerts/filter-options` for full-dataset dropdown options
 
 ### FR-7 Optional Action Automation
 - If `GITHUB_TOKEN` is configured, execute suggested GitHub actions:
@@ -146,16 +151,19 @@ For current main-flow completion, all are required:
 10. When `GITHUB_TOKEN` is set, suggested label/comment execution path is available.
 11. Action execution failures are retried and persisted when exhausted; retry API available.
 12. Action failure does not prevent webhook success after core persistence.
-13. `GET /events?source=github` (default `mode=types`) returns recent GitHub `event_types`.
-14. `GET /events?source=github&mode=items` returns paginated GitHub event items.
-15. `GET /events?source=github&sync=true` persists pulled events into `webhook_events` idempotently.
-16. `GET /events/sync-status` returns sync runtime status and last result counters.
-17. Setting `GITHUB_EVENTS_SYNC_INTERVAL_MINUTES>0` enables periodic GitHub event sync to `webhook_events`.
-18. Observability endpoints provide overview/timeseries/audit data.
-19. Runtime config endpoints provide view/update/status capabilities.
-20. `go test ./...` and `go build ./...` pass.
-21. `npm run build` passes.
-22. README/docs include setup and run instructions.
+13. `GET /events/filter-options` returns full-dataset `event_types/actions/repositories/senders`.
+14. `GET /alerts/filter-options` returns full-dataset `event_types/actions/suggestion_types/repositories/senders`.
+15. `GET /rules/filter-options` returns full-dataset `event_types/suggestion_types/active_states`.
+16. `GET /events?source=github` (default `mode=types`) returns recent GitHub `event_types`.
+17. `GET /events?source=github&mode=items` returns paginated GitHub event items.
+18. `GET /events?source=github&sync=true` persists pulled events into `webhook_events` idempotently.
+19. `GET /events/sync-status` returns sync runtime status and last result counters.
+20. Setting `GITHUB_EVENTS_SYNC_INTERVAL_MINUTES>0` enables periodic GitHub event sync to `webhook_events`.
+21. Observability endpoints provide overview/timeseries/audit data.
+22. Runtime config endpoints provide view/update/status capabilities.
+23. `go test ./...` and `go build ./...` pass.
+24. `npm run build` passes.
+25. README/docs include setup and run instructions.
 
 ## 9. Milestones
 
@@ -170,6 +178,7 @@ For current main-flow completion, all are required:
 - **M9**: JWT login + protected API/UI routes (done)
 - **M10**: action retry + failure recording without blocking webhook core path (done)
 - **M11**: `/events` GitHub source mode + on-demand/periodic sync-to-DB (`source=github`, `mode=types|items`, `sync=true`, `/events/sync-status`, scheduler) (done)
+- **M12**: Full-dataset filter-options APIs for events/alerts/rules + frontend stable dropdown integration (done)
 
 ## 10. Risks and Mitigations
 

@@ -25,8 +25,11 @@
    - `GET /health`
    - `POST /webhook/github` (HMAC signature verification)
    - `GET /events` (protected, pagination/filter/total)
+   - `GET /events/filter-options` (protected)
    - `GET /alerts` (protected, pagination/filter/total)
+   - `GET /alerts/filter-options` (protected)
    - `GET /rules`, `POST /rules` (protected)
+   - `GET /rules/filter-options` (protected)
    - `POST /auth/login` (JWT issue)
 3. Data persistence
    - `webhook_events`
@@ -38,6 +41,7 @@
    - optional GitHub auto action execution via `GITHUB_TOKEN`
 5. Frontend pages
    - login/dashboard/events/rules/alerts/failures/audit/system-config
+   - Events/Alerts/Rules dropdown filters use full-dataset filter-options APIs
    - protected route guard using bearer token
 6. Reliability hardening
    - action execution retry
@@ -135,6 +139,7 @@ Web app:
 - Better empty/error/loading states
 
 - End-to-end test: webhook -> events/rules/alerts visible in UI
+- Filter-options smoke: events/alerts/rules dropdown options come from dedicated filter-options APIs (not current page rows)
 
 ## Reopen IDE Quick Resume Checklist
 
@@ -142,7 +147,7 @@ Web app:
 2. Run `go test ./...` in `apps/api-go`
 3. Run `npm run build` in `apps/web-react`
 4. Run one-command demo from repo root: `./scripts/demo.ps1`
-5. Verify login + protected `/events` / `/rules` / `/alerts`
+5. Verify login + protected `/events` / `/events/filter-options` / `/rules` / `/rules/filter-options` / `/alerts` / `/alerts/filter-options`
 6. Verify retry/failure record behavior for action execution path
 
 ## Notes

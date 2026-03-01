@@ -50,6 +50,8 @@ API endpoints:
 - `POST http://localhost:8080/webhook/github`
 - `GET http://localhost:8080/events?limit=20&offset=0&event_type=issues&action=opened` (auth required)
   - response includes `total` for pagination
+- `GET http://localhost:8080/events/filter-options` (auth required)
+  - return full-dataset filter options: `event_types/actions/repositories/senders`
 - `GET http://localhost:8080/events?source=github` (auth required)
   - default `mode=types`, return unique `event_types`
 - `GET http://localhost:8080/events?source=github&mode=items&limit=20&offset=0` (auth required)
@@ -60,7 +62,11 @@ API endpoints:
   - return GitHub sync runtime status and last sync counters
 - `GET http://localhost:8080/alerts?limit=20&offset=0&event_type=issues&action=opened&suggestion_type=label` (auth required)
   - response includes `total` for pagination
+- `GET http://localhost:8080/alerts/filter-options` (auth required)
+  - return full-dataset filter options: `event_types/actions/suggestion_types/repositories/senders`
 - `GET/POST http://localhost:8080/rules` (auth required)
+- `GET http://localhost:8080/rules/filter-options` (auth required)
+  - return full-dataset filter options: `event_types/suggestion_types/active_states`
 - `PATCH http://localhost:8080/rules/:id/active` (auth required)
 - `GET http://localhost:8080/action-failures` (auth required)
 - `POST http://localhost:8080/action-failures/:id/retry` (auth required)
@@ -176,6 +182,7 @@ Invoke-RestMethod "http://localhost:8080/audit-logs?limit=20&offset=0" -Headers 
 - `/events` GitHub source mode (`source=github`, `mode=types|items`) + on-demand sync (`sync=true`) + `/events/sync-status` + periodic sync worker
 - Login + protected API/UI routes (JWT)
 - Query events/rules/alerts with pagination/filter + `total`
+- Full-dataset filter-options APIs for Events/Rules/Alerts
 - Failures/audit/metrics/config APIs
 - Console pages: events/rules/alerts/failures/audit/system-config
 - CI checks for API/Web build
@@ -183,7 +190,7 @@ Invoke-RestMethod "http://localhost:8080/audit-logs?limit=20&offset=0" -Headers 
 ## Secondary (next)
 
 - Dashboard alert summary widgets
-- Rich filters (repository/sender/date range, full-dataset filter options)
+- Rich filters (repository/sender/date range)
 - Export & reporting
 ## License
 

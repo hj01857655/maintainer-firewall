@@ -28,6 +28,7 @@ This design covers M3, M4, M5-v1 and post-MVP hardening done in this branch:
 - `internal/http/handlers`
   - request parsing, signature verification, event extraction, store call
   - `/events` GitHub source mode (`mode=types|items`) + optional sync and `/events/sync-status`
+  - `/events/filter-options` `/alerts/filter-options` `/rules/filter-options` full-dataset options APIs
 
 ## 3. Request/Data Flow
 
@@ -48,6 +49,7 @@ This design covers M3, M4, M5-v1 and post-MVP hardening done in this branch:
 15. `GET /events/sync-status` exposes in-memory sync runtime status and last result counters
 16. If `GITHUB_EVENTS_SYNC_INTERVAL_MINUTES > 0`, background worker periodically invokes the same sync path
 17. React console calls `GET /events` / `GET /rules` / `GET /alerts` (navigation order aligned with workflow: Rules before Alerts)
+18. React console loads full-dataset dropdown options from `/events/filter-options` `/alerts/filter-options` `/rules/filter-options`
 
 ## 4. Data Model
 
@@ -119,6 +121,10 @@ Automation config:
   - `GET /events?limit=20&offset=0&event_type=issues&action=opened` returns ordered filtered records
   - `GET /rules?...` returns configurable rules list
   - `GET /alerts?...` returns matched suggestions with pagination total
+- Filter-options APIs:
+  - `GET /events/filter-options` returns distinct `event_types/actions/repositories/senders`
+  - `GET /alerts/filter-options` returns distinct `event_types/actions/suggestion_types/repositories/senders`
+  - `GET /rules/filter-options` returns distinct `event_types/suggestion_types/active_states`
 
 ## 8. M4 Progress
 
@@ -127,11 +133,12 @@ Implemented:
 - API `GET /events` with pagination params `limit` and `offset`
 - API filtering by `event_type` and `action`
 - React event list page with dynamic dropdown filters and page/total page display
+- React alerts/rules pages use backend full-dataset filter-options to keep dropdowns stable across pagination
 
 Next:
 
 - Add endpoint tests for list/query validation
-- Add server-side sorting and richer filters (repository/sender/date range, full-dataset filter options endpoint)
+- Add server-side sorting and richer filters (repository/sender/date range)
 
 ## 9. Rules + Automation + Auth (current)
 
