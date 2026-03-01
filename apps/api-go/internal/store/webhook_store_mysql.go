@@ -555,24 +555,189 @@ func (s *MySQLWebhookEventStore) ListAuditLogs(ctx context.Context, limit int, o
 func (s *MySQLWebhookEventStore) GetAdminUserByUsername(ctx context.Context, username string) (AdminUser, error) {
 	var user AdminUser
 	var lastLogin sql.NullTime
+	var permissionsJSON string
 	name := strings.TrimSpace(username)
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, username, password_hash, is_active, created_at, updated_at, last_login_at
+		SELECT id, username, password_hash, is_active, role, permissions, created_at, updated_at, last_login_at
 		FROM admin_users
 		WHERE username = ?
 		LIMIT 1
-	`, name).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsActive, &user.CreatedAt, &user.UpdatedAt, &lastLogin)
+	`, name).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsActive, &user.Role, &permissionsJSON, &user.CreatedAt, &user.UpdatedAt, &lastLogin)
+
 	if err != nil {
-	if errors.Is(err, sql.ErrNoRows) {
-			return user, fmt.Errorf("admin user not found")
-		}
 		return user, fmt.Errorf("get admin user by username: %w", err)
 	}
-	if lastLogin.Valid {
-		t := lastLogin.Time.UTC()
-		user.LastLoginAt = &t
+
+	// 解析permissions JSON
+	if err := json.Unmarshal([]byte(permissionsJSON), &user.Permissions); err != nil {
+		return user, fmt.Errorf("parse permissions: %w", err)
 	}
+
+	if lastLogin.Valid {
+		user.LastLoginAt = &lastLogin.Time
+	}
+
 	return user, nil
+}
+
+func (s *MySQLWebhookEventStore) ListAdminUsers(ctx context.Context, limit int, offset int) ([]AdminUser, int64, error) {
+	var total int64
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM admin_users`).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count admin users: %w", err)
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, username, password_hash, is_active, role, permissions, created_at, updated_at, last_login_at
+		FROM admin_users
+		ORDER BY created_at DESC
+		LIMIT ? OFFSET ?
+	`, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("query admin users: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]AdminUser, 0, limit)
+	for rows.Next() {
+		var user AdminUser
+		var lastLogin sql.NullTime
+		var permissionsJSON string
+		if err := rows.Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsActive, &user.Role, &permissionsJSON, &user.CreatedAt, &user.UpdatedAt, &lastLogin); err != nil {
+			return nil, 0, fmt.Errorf("scan admin user: %w", err)
+		}
+
+		// 解析permissions JSON
+		if err := json.Unmarshal([]byte(permissionsJSON), &user.Permissions); err != nil {
+			return nil, 0, fmt.Errorf("parse permissions: %w", err)
+		}
+
+		if lastLogin.Valid {
+			user.LastLoginAt = &lastLogin.Time
+		}
+
+		items = append(items, user)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate admin users: %w", err)
+	}
+
+	return items, total, nil
+}
+
+func (s *MySQLWebhookEventStore) CreateAdminUser(ctx context.Context, user AdminUser) (int64, error) {
+	permissionsJSON, err := json.Marshal(user.Permissions)
+	if err != nil {
+		return 0, fmt.Errorf("marshal permissions: %w", err)
+	}
+
+	result, err := s.db.ExecContext(ctx, `
+		INSERT INTO admin_users (username, password_hash, is_active, role, permissions)
+		VALUES (?, ?, ?, ?, ?)
+	`, strings.TrimSpace(user.Username), user.PasswordHash, user.IsActive, strings.TrimSpace(user.Role), permissionsJSON)
+	if err != nil {
+		return 0, fmt.Errorf("insert admin user: %w", err)
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("get inserted admin user id: %w", err)
+	}
+
+	return id, nil
+}
+
+func (s *MySQLWebhookEventStore) UpdateAdminUser(ctx context.Context, id int64, user AdminUser) error {
+	permissionsJSON, err := json.Marshal(user.Permissions)
+	if err != nil {
+		return fmt.Errorf("marshal permissions: %w", err)
+	}
+
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE admin_users
+		SET username = ?, password_hash = ?, is_active = ?, role = ?, permissions = ?, updated_at = CURRENT_TIMESTAMP(6)
+		WHERE id = ?
+	`, strings.TrimSpace(user.Username), user.PasswordHash, user.IsActive, strings.TrimSpace(user.Role), permissionsJSON, id)
+	if err != nil {
+		return fmt.Errorf("update admin user: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("get affected rows for admin user update: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("admin user not found")
+	}
+
+	return nil
+}
+
+func (s *MySQLWebhookEventStore) DeleteAdminUser(ctx context.Context, id int64) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM admin_users WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete admin user: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("get affected rows for admin user delete: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("admin user not found")
+	}
+
+	return nil
+}
+
+func (s *MySQLWebhookEventStore) GetAdminUserByID(ctx context.Context, id int64) (AdminUser, error) {
+	var user AdminUser
+	var lastLogin sql.NullTime
+	var permissionsJSON string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id, username, password_hash, is_active, role, permissions, created_at, updated_at, last_login_at
+		FROM admin_users
+		WHERE id = ?
+	`, id).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsActive, &user.Role, &permissionsJSON, &user.CreatedAt, &user.UpdatedAt, &lastLogin)
+
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return user, fmt.Errorf("admin user not found")
+		}
+		return user, fmt.Errorf("get admin user by id: %w", err)
+	}
+
+	// 解析permissions JSON
+	if err := json.Unmarshal([]byte(permissionsJSON), &user.Permissions); err != nil {
+		return user, fmt.Errorf("parse permissions: %w", err)
+	}
+
+	if lastLogin.Valid {
+		user.LastLoginAt = &lastLogin.Time
+	}
+
+	return user, nil
+}
+
+func (s *MySQLWebhookEventStore) UpdateAdminUserActive(ctx context.Context, id int64, isActive bool) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE admin_users
+		SET is_active = ?, updated_at = CURRENT_TIMESTAMP(6)
+		WHERE id = ?
+	`, isActive, id)
+	if err != nil {
+		return fmt.Errorf("update admin user active: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("get affected rows for admin user active update: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("admin user not found")
+	}
+
+	return nil
 }
 
 func (s *MySQLWebhookEventStore) UpdateAdminUserLastLogin(ctx context.Context, id int64, at time.Time) error {
@@ -606,8 +771,8 @@ func (s *MySQLWebhookEventStore) EnsureBootstrapAdminUser(ctx context.Context, u
 	}
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO admin_users (username, password_hash, is_active)
-		VALUES (?, ?, TRUE)
+		INSERT INTO admin_users (username, password_hash, is_active, role, permissions)
+		VALUES (?, ?, TRUE, 'admin', JSON_ARRAY('read','write','admin'))
 		ON DUPLICATE KEY UPDATE username = username
 	`, name, hash)
 	if err != nil {
@@ -809,6 +974,8 @@ func (s *MySQLWebhookEventStore) ensureSchema(ctx context.Context) error {
 			username VARCHAR(191) NOT NULL,
 			password_hash VARCHAR(255) NOT NULL,
 			is_active BOOLEAN NOT NULL DEFAULT TRUE,
+			role VARCHAR(50) NOT NULL DEFAULT 'viewer',
+			permissions JSON NOT NULL DEFAULT ('["read"]'),
 			last_login_at DATETIME(6) NULL,
 			created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
 			updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
@@ -840,6 +1007,8 @@ func (s *MySQLWebhookEventStore) ensureSchema(ctx context.Context) error {
 	_, _ = s.db.ExecContext(ctx, `ALTER TABLE webhook_action_failures ADD COLUMN last_retry_message TEXT NOT NULL`)
 	_, _ = s.db.ExecContext(ctx, `ALTER TABLE webhook_action_failures ADD COLUMN last_retry_at DATETIME(6) NULL`)
 	_, _ = s.db.ExecContext(ctx, `ALTER TABLE webhook_action_failures ADD COLUMN is_resolved BOOLEAN NOT NULL DEFAULT FALSE`)
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE admin_users ADD COLUMN role VARCHAR(50) NOT NULL DEFAULT 'viewer'`)
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE admin_users ADD COLUMN permissions JSON NOT NULL DEFAULT ('["read"]')`)
 	_, _ = s.db.ExecContext(ctx, `ALTER TABLE admin_users ADD COLUMN last_login_at DATETIME(6) NULL`)
 	_, _ = s.db.ExecContext(ctx, `ALTER TABLE admin_users ADD COLUMN updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)`)
 	return nil

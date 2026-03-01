@@ -9,6 +9,7 @@ import (
 	"time"
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -65,6 +66,8 @@ type AdminUser struct {
 	Username     string     `json:"username"`
 	PasswordHash string     `json:"password_hash"`
 	IsActive     bool       `json:"is_active"`
+	Role         string     `json:"role"`         // admin, editor, viewer
+	Permissions  []string   `json:"permissions"`  // read, write, admin
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
 	LastLoginAt  *time.Time `json:"last_login_at,omitempty"`
@@ -171,6 +174,17 @@ type WebhookStore interface {
 	SaveDeliveryMetric(ctx context.Context, metric DeliveryMetric) error
 	GetMetricsOverview(ctx context.Context, since time.Time) (MetricsOverview, error)
 	GetMetricsTimeSeries(ctx context.Context, since time.Time, intervalMinutes int) ([]MetricsTimePoint, error)
+	UserStore
+}
+
+type UserStore interface {
+	ListAdminUsers(ctx context.Context, limit int, offset int) ([]AdminUser, int64, error)
+	CreateAdminUser(ctx context.Context, user AdminUser) (int64, error)
+	UpdateAdminUser(ctx context.Context, id int64, user AdminUser) error
+	DeleteAdminUser(ctx context.Context, id int64) error
+	GetAdminUserByID(ctx context.Context, id int64) (AdminUser, error)
+	UpdateAdminUserActive(ctx context.Context, id int64, isActive bool) error
+	SaveAuditLog(ctx context.Context, item AuditLogRecord) error
 }
 
 func NewWebhookEventStore(ctx context.Context, databaseURL string) (WebhookStore, error) {
@@ -658,6 +672,156 @@ func (s *WebhookEventStore) GetAdminUserByUsername(ctx context.Context, username
 	}
 	return user, nil
 }
+func (s *WebhookEventStore) ListAdminUsers(ctx context.Context, limit int, offset int) ([]AdminUser, int64, error) {
+	var total int64
+	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM admin_users`).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count admin users: %w", err)
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, username, password_hash, is_active, role, permissions, created_at, updated_at, COALESCE(last_login_at, 'epoch'::timestamptz)
+		FROM admin_users
+		ORDER BY created_at DESC
+		LIMIT $1 OFFSET $2
+	`, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("query admin users: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]AdminUser, 0, limit)
+	for rows.Next() {
+		var user AdminUser
+		var lastLoginAt time.Time
+		var permissionsJSON string
+		if err := rows.Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsActive, &user.Role, &permissionsJSON, &user.CreatedAt, &user.UpdatedAt, &lastLoginAt); err != nil {
+			return nil, 0, fmt.Errorf("scan admin user: %w", err)
+		}
+
+		// 解析permissions JSON
+		if err := json.Unmarshal([]byte(permissionsJSON), &user.Permissions); err != nil {
+			return nil, 0, fmt.Errorf("parse permissions: %w", err)
+		}
+
+		if !lastLoginAt.IsZero() && lastLoginAt.Unix() > 0 {
+			user.LastLoginAt = &lastLoginAt
+		}
+
+		items = append(items, user)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate admin users: %w", err)
+	}
+
+	return items, total, nil
+}
+
+func (s *WebhookEventStore) CreateAdminUser(ctx context.Context, user AdminUser) (int64, error) {
+	permissionsJSON, err := json.Marshal(user.Permissions)
+	if err != nil {
+		return 0, fmt.Errorf("marshal permissions: %w", err)
+	}
+
+	var id int64
+	err = s.pool.QueryRow(ctx, `
+		INSERT INTO admin_users (username, password_hash, is_active, role, permissions)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id
+	`, strings.TrimSpace(user.Username), user.PasswordHash, user.IsActive, strings.TrimSpace(user.Role), permissionsJSON).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("insert admin user: %w", err)
+	}
+
+	return id, nil
+}
+
+func (s *WebhookEventStore) UpdateAdminUser(ctx context.Context, id int64, user AdminUser) error {
+	permissionsJSON, err := json.Marshal(user.Permissions)
+	if err != nil {
+		return fmt.Errorf("marshal permissions: %w", err)
+	}
+
+	result, err := s.pool.Exec(ctx, `
+		UPDATE admin_users
+		SET username = $1, password_hash = $2, is_active = $3, role = $4, permissions = $5, updated_at = NOW()
+		WHERE id = $6
+	`, strings.TrimSpace(user.Username), user.PasswordHash, user.IsActive, strings.TrimSpace(user.Role), permissionsJSON, id)
+	if err != nil {
+		return fmt.Errorf("update admin user: %w", err)
+	}
+
+	affected := result.RowsAffected()
+	_ = affected // 使用变量避免unused错误
+	if affected == 0 {
+		return fmt.Errorf("admin user not found")
+	}
+
+	return nil
+}
+
+func (s *WebhookEventStore) DeleteAdminUser(ctx context.Context, id int64) error {
+	result, err := s.pool.Exec(ctx, `DELETE FROM admin_users WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("delete admin user: %w", err)
+	}
+
+	affected := result.RowsAffected()
+	_ = affected // 使用变量避免unused错误
+	if affected == 0 {
+		return fmt.Errorf("admin user not found")
+	}
+
+	return nil
+}
+
+func (s *WebhookEventStore) GetAdminUserByID(ctx context.Context, id int64) (AdminUser, error) {
+	var user AdminUser
+	var lastLoginAt time.Time
+	var permissionsJSON string
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, username, password_hash, is_active, role, permissions, created_at, updated_at, COALESCE(last_login_at, 'epoch'::timestamptz)
+		FROM admin_users
+		WHERE id = $1
+	`, id).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsActive, &user.Role, &permissionsJSON, &user.CreatedAt, &user.UpdatedAt, &lastLoginAt)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return user, fmt.Errorf("admin user not found")
+		}
+		return user, fmt.Errorf("get admin user by id: %w", err)
+	}
+
+	// 解析permissions JSON
+	if err := json.Unmarshal([]byte(permissionsJSON), &user.Permissions); err != nil {
+		return user, fmt.Errorf("parse permissions: %w", err)
+	}
+
+	if !lastLoginAt.IsZero() && lastLoginAt.Unix() > 0 {
+		user.LastLoginAt = &lastLoginAt
+	}
+
+	return user, nil
+}
+
+func (s *WebhookEventStore) UpdateAdminUserActive(ctx context.Context, id int64, isActive bool) error {
+	result, err := s.pool.Exec(ctx, `
+		UPDATE admin_users
+		SET is_active = $1, updated_at = NOW()
+		WHERE id = $2
+	`, isActive, id)
+	if err != nil {
+		return fmt.Errorf("update admin user active: %w", err)
+	}
+
+	affected := result.RowsAffected()
+	_ = affected // 使用变量避免unused错误
+	if affected == 0 {
+		return fmt.Errorf("admin user not found")
+	}
+
+	return nil
+}
 
 func (s *WebhookEventStore) UpdateAdminUserLastLogin(ctx context.Context, id int64, at time.Time) error {
 	result, err := s.pool.Exec(ctx, `UPDATE admin_users SET last_login_at = $2, updated_at = NOW() WHERE id = $1`, id, at.UTC())
@@ -686,8 +850,8 @@ func (s *WebhookEventStore) EnsureBootstrapAdminUser(ctx context.Context, userna
 	}
 
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO admin_users (username, password_hash, is_active)
-		VALUES ($1, $2, TRUE)
+		INSERT INTO admin_users (username, password_hash, is_active, role, permissions)
+		VALUES ($1, $2, TRUE, 'admin', '["read","write","admin"]'::jsonb)
 		ON CONFLICT (username) DO NOTHING
 	`, name, hash)
 	if err != nil {
@@ -1050,6 +1214,8 @@ func (s *WebhookEventStore) ensureSchema(ctx context.Context) error {
 			username TEXT NOT NULL UNIQUE,
 			password_hash TEXT NOT NULL,
 			is_active BOOLEAN NOT NULL DEFAULT TRUE,
+			role TEXT NOT NULL DEFAULT 'viewer',
+			permissions JSONB NOT NULL DEFAULT '["read"]'::jsonb,
 			last_login_at TIMESTAMPTZ NULL,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -1105,6 +1271,8 @@ func (s *WebhookEventStore) ensureSchema(ctx context.Context) error {
 		return fmt.Errorf("create idx_admin_users_username: %w", err)
 	}
 
+	_, _ = s.pool.Exec(ctx, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'viewer'`)
+	_, _ = s.pool.Exec(ctx, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS permissions JSONB NOT NULL DEFAULT '["read"]'::jsonb`)
 	_, _ = s.pool.Exec(ctx, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ NULL`)
 	_, _ = s.pool.Exec(ctx, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`)
 
