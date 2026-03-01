@@ -67,6 +67,10 @@ func (h *EventsHandler) List(c *gin.Context) {
 			return
 		}
 		syncEnabled := strings.EqualFold(strings.TrimSpace(c.Query("sync")), "true")
+		mode := strings.ToLower(strings.TrimSpace(c.Query("mode")))
+		if mode == "" {
+			mode = "types"
+		}
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 8*time.Second)
 		defer cancel()
 
@@ -81,7 +85,7 @@ func (h *EventsHandler) List(c *gin.Context) {
 				if strings.Contains(errMsg, "already running") {
 					status = http.StatusConflict
 				}
-				c.JSON(status, gin.H{"ok": false, "message": err.Error()})
+				c.JSON(status, gin.H{"ok": false, "message": fmt.Sprintf("sync github events failed: %v", err)})
 				return
 			}
 			c.JSON(http.StatusOK, gin.H{
@@ -89,6 +93,52 @@ func (h *EventsHandler) List(c *gin.Context) {
 				"source": "github",
 				"sync":   true,
 				"saved":  saved,
+				"total":  total,
+			})
+			return
+		}
+
+		if mode == "items" {
+			limit := parseIntOrDefault(c.Query("limit"), 20)
+			offset := parseIntOrDefault(c.Query("offset"), 0)
+			if limit < 1 {
+				limit = 1
+			}
+			if limit > 100 {
+				limit = 100
+			}
+			if offset < 0 {
+				offset = 0
+			}
+
+			events, err := h.GitHubProvider.ListRecentEvents(ctx)
+			if err != nil {
+				status := http.StatusBadGateway
+				errMsg := strings.ToLower(err.Error())
+				if strings.Contains(errMsg, "not configured") {
+					status = http.StatusInternalServerError
+				}
+				c.JSON(status, gin.H{"ok": false, "message": fmt.Sprintf("list github events failed: %v", err)})
+				return
+			}
+
+			total := len(events)
+			if offset > total {
+				offset = total
+			}
+			end := offset + limit
+			if end > total {
+				end = total
+			}
+			items := events[offset:end]
+
+			c.JSON(http.StatusOK, gin.H{
+				"ok":     true,
+				"source": "github",
+				"mode":   "items",
+				"items":  items,
+				"limit":  limit,
+				"offset": offset,
 				"total":  total,
 			})
 			return
@@ -107,11 +157,13 @@ func (h *EventsHandler) List(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"ok":          true,
 			"source":      "github",
+			"mode":        "types",
 			"event_types": types,
 			"total":       len(types),
 		})
 		return
 	}
+
 
 	if h.Store == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "message": "event store is not configured"})

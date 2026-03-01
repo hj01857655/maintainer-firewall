@@ -129,7 +129,7 @@ func (s *MySQLWebhookEventStore) ListEvents(ctx context.Context, limit int, offs
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, delivery_id, event_type, action, repository_full_name, sender_login, received_at
+		SELECT id, delivery_id, event_type, action, repository_full_name, sender_login, payload_json, received_at
 		FROM webhook_events
 		WHERE (? = '' OR event_type = ?)
 		  AND (? = '' OR action = ?)
@@ -144,7 +144,7 @@ func (s *MySQLWebhookEventStore) ListEvents(ctx context.Context, limit int, offs
 	items := make([]WebhookEventRecord, 0, limit)
 	for rows.Next() {
 		var rec WebhookEventRecord
-		if err := rows.Scan(&rec.ID, &rec.DeliveryID, &rec.EventType, &rec.Action, &rec.RepositoryFullName, &rec.SenderLogin, &rec.ReceivedAt); err != nil {
+		if err := rows.Scan(&rec.ID, &rec.DeliveryID, &rec.EventType, &rec.Action, &rec.RepositoryFullName, &rec.SenderLogin, &rec.PayloadJSON, &rec.ReceivedAt); err != nil {
 			return nil, 0, fmt.Errorf("scan webhook event row: %w", err)
 		}
 		items = append(items, rec)

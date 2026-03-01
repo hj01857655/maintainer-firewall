@@ -106,12 +106,8 @@ func (e *GitHubActionExecutor) ListRecentEvents(ctx context.Context) ([]GitHubUs
 		payload, _ := json.Marshal(item)
 		eventID, _ := item["id"].(string)
 		typ, _ := item["type"].(string)
-		action := "unknown"
-		if p, ok := item["payload"].(map[string]any); ok {
-			if a, ok := p["action"].(string); ok && strings.TrimSpace(a) != "" {
-				action = strings.TrimSpace(a)
-			}
-		}
+		payloadMap, _ := item["payload"].(map[string]any)
+		action := normalizeGitHubEventAction(strings.TrimSpace(typ), payloadMap)
 		repo := "unknown"
 		if r, ok := item["repo"].(map[string]any); ok {
 			if n, ok := r["name"].(string); ok && strings.TrimSpace(n) != "" {
@@ -139,6 +135,38 @@ func (e *GitHubActionExecutor) ListRecentEvents(ctx context.Context) ([]GitHubUs
 	}
 
 	return out, nil
+}
+
+func normalizeGitHubEventAction(eventType string, payload map[string]any) string {
+	if payload != nil {
+		if a, ok := payload["action"].(string); ok && strings.TrimSpace(a) != "" {
+			return strings.TrimSpace(a)
+		}
+	}
+	switch strings.TrimSpace(eventType) {
+	case "PushEvent":
+		return "pushed"
+	case "WatchEvent":
+		return "started"
+	case "ForkEvent":
+		return "forked"
+	case "CreateEvent":
+		if payload != nil {
+			if refType, ok := payload["ref_type"].(string); ok && strings.TrimSpace(refType) != "" {
+				return "created:" + strings.TrimSpace(refType)
+			}
+		}
+		return "created"
+	case "DeleteEvent":
+		if payload != nil {
+			if refType, ok := payload["ref_type"].(string); ok && strings.TrimSpace(refType) != "" {
+				return "deleted:" + strings.TrimSpace(refType)
+			}
+		}
+		return "deleted"
+	default:
+		return "unknown"
+	}
 }
 
 func (e *GitHubActionExecutor) getAuthenticatedLogin(ctx context.Context) (string, error) {

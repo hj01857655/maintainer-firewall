@@ -173,11 +173,12 @@ func TestEventsList_SourceGitHub_Success(t *testing.T) {
 	var resp struct {
 		OK         bool     `json:"ok"`
 		Source     string   `json:"source"`
+		Mode       string   `json:"mode"`
 		EventTypes []string `json:"event_types"`
 		Total      int      `json:"total"`
 	}
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
-	if !resp.OK || resp.Source != "github" || resp.Total != 2 || len(resp.EventTypes) != 2 {
+	if !resp.OK || resp.Source != "github" || resp.Mode != "types" || resp.Total != 2 || len(resp.EventTypes) != 2 {
 		t.Fatalf("unexpected response: %s", w.Body.String())
 	}
 }
@@ -207,6 +208,23 @@ func TestEventsList_SourceGitHub_ProviderError(t *testing.T) {
 	r.GET("/events", h.List)
 
 	req := httptest.NewRequest(http.MethodGet, "/events?source=github", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("expected status 502, got %d, body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestEventsList_SourceGitHub_ModeItems_ProviderError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	githubProvider := &mockGitHubEventTypesProvider{err: errors.New("github api status: 401")}
+	h := NewEventsHandler(&mockEventsStore{}, githubProvider)
+	r := gin.New()
+	r.GET("/events", h.List)
+
+	req := httptest.NewRequest(http.MethodGet, "/events?source=github&mode=items", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -254,6 +272,54 @@ func TestEventsList_SourceGitHub_SyncTrue_SavesEvents(t *testing.T) {
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 	if !resp.OK || !resp.Sync || resp.Saved != 1 || resp.Total != 1 {
 		t.Fatalf("unexpected response: %s", w.Body.String())
+	}
+}
+
+func TestEventsList_SourceGitHub_ModeItems_ReturnsItems(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	mockStore := &mockEventsStore{}
+	githubProvider := &mockGitHubEventTypesProvider{events: []service.GitHubUserEvent{{
+		DeliveryID:         "gh-2001",
+		EventType:          "IssuesEvent",
+		Action:             "opened",
+		RepositoryFullName: "owner/repo",
+		SenderLogin:        "bob",
+		PayloadJSON:        []byte(`{"id":"2001"}`),
+	}}}
+	h := NewEventsHandler(mockStore, githubProvider)
+	r := gin.New()
+	r.GET("/events", h.List)
+
+	req := httptest.NewRequest(http.MethodGet, "/events?source=github&mode=items&limit=10&offset=0", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", w.Code, w.Body.String())
+	}
+	if githubProvider.calls != 1 {
+		t.Fatalf("expected github provider called once, got %d", githubProvider.calls)
+	}
+
+	var resp struct {
+		OK     bool                   `json:"ok"`
+		Source string                 `json:"source"`
+		Mode   string                 `json:"mode"`
+		Total  int                    `json:"total"`
+		Limit  int                    `json:"limit"`
+		Offset int                    `json:"offset"`
+		Items  []service.GitHubUserEvent `json:"items"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if !resp.OK || resp.Source != "github" || resp.Mode != "items" || resp.Total != 1 {
+		t.Fatalf("unexpected response: %s", w.Body.String())
+	}
+	if resp.Limit != 10 || resp.Offset != 0 {
+		t.Fatalf("unexpected paging: %+v", resp)
+	}
+	if len(resp.Items) != 1 || resp.Items[0].DeliveryID != "gh-2001" {
+		t.Fatalf("unexpected items: %+v", resp.Items)
 	}
 }
 

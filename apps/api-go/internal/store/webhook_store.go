@@ -25,15 +25,15 @@ type WebhookEvent struct {
 type WebhookEventStore struct {
 	pool *pgxpool.Pool
 }
-
 type WebhookEventRecord struct {
-	ID                 int64     `json:"id"`
-	DeliveryID         string    `json:"delivery_id"`
-	EventType          string    `json:"event_type"`
-	Action             string    `json:"action"`
-	RepositoryFullName string    `json:"repository_full_name"`
-	SenderLogin        string    `json:"sender_login"`
-	ReceivedAt         time.Time `json:"received_at"`
+	ID                 int64           `json:"id"`
+	DeliveryID         string          `json:"delivery_id"`
+	EventType          string          `json:"event_type"`
+	Action             string          `json:"action"`
+	RepositoryFullName string          `json:"repository_full_name"`
+	SenderLogin        string          `json:"sender_login"`
+	PayloadJSON        json.RawMessage `json:"payload_json,omitempty"`
+	ReceivedAt         time.Time       `json:"received_at"`
 }
 
 type AlertRecord struct {
@@ -231,7 +231,7 @@ func (s *WebhookEventStore) ListEvents(ctx context.Context, limit int, offset in
 	}
 
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, delivery_id, event_type, action, repository_full_name, sender_login, received_at
+		SELECT id, delivery_id, event_type, action, repository_full_name, sender_login, payload_json, received_at
 		FROM webhook_events
 		WHERE ($1 = '' OR event_type = $1)
 		  AND ($2 = '' OR action = $2)
@@ -253,6 +253,7 @@ func (s *WebhookEventStore) ListEvents(ctx context.Context, limit int, offset in
 			&item.Action,
 			&item.RepositoryFullName,
 			&item.SenderLogin,
+			&item.PayloadJSON,
 			&item.ReceivedAt,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scan webhook event: %w", err)
