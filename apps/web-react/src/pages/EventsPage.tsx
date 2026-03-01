@@ -19,6 +19,34 @@ type EventsResponse = {
   message?: string
 }
 
+type SyncStatus = {
+  running: boolean
+  last_started_at?: string
+  last_finished_at?: string
+  last_success_at?: string
+  last_saved: number
+  last_total: number
+  last_error?: string
+  success_count: number
+  failure_count: number
+}
+
+type SyncStatusResponse = {
+  ok: boolean
+  source: string
+  status: SyncStatus
+  message?: string
+}
+
+type SyncTriggerResponse = {
+  ok: boolean
+  source: string
+  sync: boolean
+  saved: number
+  total: number
+  message?: string
+}
+
 export function EventsPage() {
   const { t } = useTranslation()
   const [events, setEvents] = useState<EventItem[]>([])
@@ -27,10 +55,13 @@ export function EventsPage() {
   const [actionFilter, setActionFilter] = useState('')
   const [offset, setOffset] = useState(0)
   const [total, setTotal] = useState(0)
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null)
+  const [syncing, setSyncing] = useState(false)
+  const [syncMessage, setSyncMessage] = useState('')
   const limit = 20
 
-  useEffect(() => {
-    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  function reloadEvents(nextOffset = offset) {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(nextOffset) })
     if (eventTypeFilter) params.set('event_type', eventTypeFilter)
     if (actionFilter) params.set('action', actionFilter)
 
@@ -49,7 +80,33 @@ export function EventsPage() {
         setError('')
       })
       .catch((e: Error) => setError(e.message))
+  }
+
+  function loadSyncStatus() {
+    apiFetch('/api/events/sync-status')
+      .then(async (r) => {
+        if (!r.ok) {
+          const body = await r.text()
+          throw new Error(`sync-status HTTP ${r.status} ${body}`.trim())
+        }
+        return r.json() as Promise<SyncStatusResponse>
+      })
+      .then((data) => {
+        if (!data.ok) throw new Error(data.message || 'sync status response not ok')
+        setSyncStatus(data.status)
+      })
+      .catch((e: Error) => setError(e.message))
+  }
+
+  useEffect(() => {
+    reloadEvents(offset)
   }, [eventTypeFilter, actionFilter, offset])
+
+  useEffect(() => {
+    loadSyncStatus()
+    const timer = window.setInterval(loadSyncStatus, 10000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   const currentPage = useMemo(() => Math.floor(offset / limit) + 1, [offset])
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / limit)), [total])
@@ -96,6 +153,57 @@ export function EventsPage() {
               {t('common.applyFilters')}
             </button>
           </div>
+        </div>
+
+        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="space-y-1 text-sm text-slate-700">
+              <p className="font-semibold text-slate-900">{t('events.sync.title')}</p>
+              <p>{t('events.sync.running')}: {syncStatus?.running ? t('events.sync.yes') : t('events.sync.no')}</p>
+              <p>{t('events.sync.lastSuccess')}: {syncStatus?.last_success_at ? new Date(syncStatus.last_success_at).toLocaleString() : '-'}</p>
+              <p>{t('events.sync.lastResult')}: {syncStatus ? `${syncStatus.last_saved} / ${syncStatus.last_total}` : '-'}</p>
+              <p>{t('events.sync.stats')}: {syncStatus ? `${syncStatus.success_count} / ${syncStatus.failure_count}` : '-'}</p>
+              {syncStatus?.last_error ? <p className="text-red-600">{t('events.sync.lastError')}: {syncStatus.last_error}</p> : null}
+            </div>
+            <div className="flex w-full gap-2 md:w-auto">
+              <button
+                className="h-11 min-w-[120px] cursor-pointer rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition-colors duration-200 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                onClick={() => loadSyncStatus()}
+                aria-label={t('events.sync.refreshStatus')}
+              >
+                {t('events.sync.refreshStatus')}
+              </button>
+              <button
+                className="h-11 min-w-[140px] cursor-pointer rounded-xl bg-orange-500 px-4 text-sm font-semibold text-white transition-colors duration-200 hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={async () => {
+                  try {
+                    setSyncing(true)
+                    setSyncMessage('')
+                    const r = await apiFetch('/api/events?source=github&sync=true')
+                    if (!r.ok) {
+                      const body = await r.text()
+                      throw new Error(`sync HTTP ${r.status} ${body}`.trim())
+                    }
+                    const data = (await r.json()) as SyncTriggerResponse
+                    if (!data.ok) throw new Error(data.message || 'sync response not ok')
+                    setSyncMessage(t('events.sync.synced', { saved: data.saved, total: data.total }))
+                    setOffset(0)
+                    reloadEvents(0)
+                    loadSyncStatus()
+                  } catch (e) {
+                    setError((e as Error).message)
+                  } finally {
+                    setSyncing(false)
+                  }
+                }}
+                disabled={syncing || !!syncStatus?.running}
+                aria-label={t('events.sync.syncNow')}
+              >
+                {syncing ? t('events.sync.syncing') : t('events.sync.syncNow')}
+              </button>
+            </div>
+          </div>
+          {syncMessage ? <p className="mt-2 text-sm text-emerald-700">{syncMessage}</p> : null}
         </div>
       </div>
 
