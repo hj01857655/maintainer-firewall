@@ -17,6 +17,7 @@ import (
 
 type WebhookEventStore interface {
 	ListEvents(ctx context.Context, limit int, offset int, eventType string, action string) ([]store.WebhookEventRecord, int64, error)
+	ListEventFilterOptions(ctx context.Context) (store.EventFilterOptions, error)
 	SaveEvent(ctx context.Context, evt store.WebhookEvent) error
 }
 
@@ -272,6 +273,21 @@ func (h *EventsHandler) GitHubSyncStatus(c *gin.Context) {
 		"source": "github",
 		"status": status,
 	})
+}
+
+func (h *EventsHandler) FilterOptions(c *gin.Context) {
+	if h.Store == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "message": "event store is not configured"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+	options, err := h.Store.ListEventFilterOptions(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "message": fmt.Sprintf("list event filter options failed: %v", err)})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "options": options})
 }
 
 func parseIntOrDefault(v string, fallback int) int {

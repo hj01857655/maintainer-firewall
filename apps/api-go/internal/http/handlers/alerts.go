@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"time"
 
 	"maintainer-firewall/api-go/internal/store"
@@ -12,6 +13,7 @@ import (
 
 type AlertLister interface {
 	ListAlerts(ctx context.Context, limit int, offset int, eventType string, action string, suggestionType string) ([]store.AlertRecord, int64, error)
+	ListAlertFilterOptions(ctx context.Context) (store.AlertFilterOptions, error)
 }
 
 type AlertsHandler struct {
@@ -74,4 +76,19 @@ func (h *AlertsHandler) List(c *gin.Context) {
 		Action:         action,
 		SuggestionType: suggestionType,
 	})
+}
+
+func (h *AlertsHandler) FilterOptions(c *gin.Context) {
+	if h.Store == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "message": "alert store is not configured"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+	options, err := h.Store.ListAlertFilterOptions(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "message": fmt.Sprintf("list alert filter options failed: %v", err)})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "options": options})
 }

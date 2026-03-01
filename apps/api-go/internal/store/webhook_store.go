@@ -87,6 +87,27 @@ type ActionExecutionFailure struct {
 	OccurredAt         time.Time `json:"occurred_at,omitempty"`
 }
 
+type EventFilterOptions struct {
+	EventTypes   []string `json:"event_types"`
+	Actions      []string `json:"actions"`
+	Repositories []string `json:"repositories"`
+	Senders      []string `json:"senders"`
+}
+
+type AlertFilterOptions struct {
+	EventTypes      []string `json:"event_types"`
+	Actions         []string `json:"actions"`
+	SuggestionTypes []string `json:"suggestion_types"`
+	Repositories    []string `json:"repositories"`
+	Senders         []string `json:"senders"`
+}
+
+type RuleFilterOptions struct {
+	EventTypes      []string `json:"event_types"`
+	SuggestionTypes []string `json:"suggestion_types"`
+	ActiveStates    []string `json:"active_states"`
+}
+
 type ActionExecutionFailureRecord struct {
 	ID int64 `json:"id"`
 	ActionExecutionFailure
@@ -132,6 +153,9 @@ type WebhookStore interface {
 	ListEvents(ctx context.Context, limit int, offset int, eventType string, action string) ([]WebhookEventRecord, int64, error)
 	ListAlerts(ctx context.Context, limit int, offset int, eventType string, action string, suggestionType string) ([]AlertRecord, int64, error)
 	ListRules(ctx context.Context, limit int, offset int, eventType string, keyword string, activeOnly bool) ([]RuleRecord, int64, error)
+	ListEventFilterOptions(ctx context.Context) (EventFilterOptions, error)
+	ListAlertFilterOptions(ctx context.Context) (AlertFilterOptions, error)
+	ListRuleFilterOptions(ctx context.Context) (RuleFilterOptions, error)
 	CreateRule(ctx context.Context, rule RuleRecord) (int64, error)
 	UpdateRuleActive(ctx context.Context, id int64, isActive bool) error
 	SaveActionExecutionFailure(ctx context.Context, item ActionExecutionFailure) error
@@ -144,7 +168,6 @@ type WebhookStore interface {
 	GetAdminUserByUsername(ctx context.Context, username string) (AdminUser, error)
 	UpdateAdminUserLastLogin(ctx context.Context, id int64, at time.Time) error
 	EnsureBootstrapAdminUser(ctx context.Context, username string, passwordHash string) error
-
 	SaveDeliveryMetric(ctx context.Context, metric DeliveryMetric) error
 	GetMetricsOverview(ctx context.Context, since time.Time) (MetricsOverview, error)
 	GetMetricsTimeSeries(ctx context.Context, since time.Time, intervalMinutes int) ([]MetricsTimePoint, error)
@@ -357,17 +380,117 @@ func (s *WebhookEventStore) ListRules(ctx context.Context, limit int, offset int
 
 	items := make([]RuleRecord, 0, limit)
 	for rows.Next() {
-		var item RuleRecord
-		if err := rows.Scan(&item.ID, &item.EventType, &item.Keyword, &item.SuggestionType, &item.SuggestionValue, &item.Reason, &item.IsActive, &item.CreatedAt); err != nil {
-			return nil, 0, fmt.Errorf("scan webhook rule: %w", err)
+		var rec RuleRecord
+		if err := rows.Scan(&rec.ID, &rec.EventType, &rec.Keyword, &rec.SuggestionType, &rec.SuggestionValue, &rec.Reason, &rec.IsActive, &rec.CreatedAt); err != nil {
+			return nil, 0, fmt.Errorf("scan webhook rule row: %w", err)
 		}
-		items = append(items, item)
+		items = append(items, rec)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, 0, fmt.Errorf("iterate webhook rules: %w", err)
 	}
 	return items, total, nil
 }
+
+func listDistinctNonEmpty(ctx context.Context, pool *pgxpool.Pool, q string) ([]string, error) {
+	rows, err := pool.Query(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]string, 0, 32)
+	for rows.Next() {
+		var v string
+		if err := rows.Scan(&v); err != nil {
+			return nil, err
+		}
+		v = strings.TrimSpace(v)
+		if v != "" {
+			out = append(out, v)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (s *WebhookEventStore) ListEventFilterOptions(ctx context.Context) (EventFilterOptions, error) {
+	et, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT event_type FROM webhook_events WHERE event_type <> '' ORDER BY event_type ASC`)
+	if err != nil {
+		return EventFilterOptions{}, fmt.Errorf("list distinct event_type from webhook_events: %w", err)
+	}
+	ac, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT action FROM webhook_events WHERE action <> '' ORDER BY action ASC`)
+	if err != nil {
+		return EventFilterOptions{}, fmt.Errorf("list distinct action from webhook_events: %w", err)
+	}
+	repo, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT repository_full_name FROM webhook_events WHERE repository_full_name <> '' ORDER BY repository_full_name ASC`)
+	if err != nil {
+		return EventFilterOptions{}, fmt.Errorf("list distinct repository from webhook_events: %w", err)
+	}
+	sender, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT sender_login FROM webhook_events WHERE sender_login <> '' ORDER BY sender_login ASC`)
+	if err != nil {
+		return EventFilterOptions{}, fmt.Errorf("list distinct sender from webhook_events: %w", err)
+	}
+	return EventFilterOptions{EventTypes: et, Actions: ac, Repositories: repo, Senders: sender}, nil
+}
+
+func (s *WebhookEventStore) ListAlertFilterOptions(ctx context.Context) (AlertFilterOptions, error) {
+	et, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT event_type FROM webhook_alerts WHERE event_type <> '' ORDER BY event_type ASC`)
+	if err != nil {
+		return AlertFilterOptions{}, fmt.Errorf("list distinct event_type from webhook_alerts: %w", err)
+	}
+	ac, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT action FROM webhook_alerts WHERE action <> '' ORDER BY action ASC`)
+	if err != nil {
+		return AlertFilterOptions{}, fmt.Errorf("list distinct action from webhook_alerts: %w", err)
+	}
+	st, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT suggestion_type FROM webhook_alerts WHERE suggestion_type <> '' ORDER BY suggestion_type ASC`)
+	if err != nil {
+		return AlertFilterOptions{}, fmt.Errorf("list distinct suggestion_type from webhook_alerts: %w", err)
+	}
+	repo, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT repository_full_name FROM webhook_alerts WHERE repository_full_name <> '' ORDER BY repository_full_name ASC`)
+	if err != nil {
+		return AlertFilterOptions{}, fmt.Errorf("list distinct repository from webhook_alerts: %w", err)
+	}
+	sender, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT sender_login FROM webhook_alerts WHERE sender_login <> '' ORDER BY sender_login ASC`)
+	if err != nil {
+		return AlertFilterOptions{}, fmt.Errorf("list distinct sender from webhook_alerts: %w", err)
+	}
+	return AlertFilterOptions{EventTypes: et, Actions: ac, SuggestionTypes: st, Repositories: repo, Senders: sender}, nil
+}
+
+func (s *WebhookEventStore) ListRuleFilterOptions(ctx context.Context) (RuleFilterOptions, error) {
+	et, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT event_type FROM webhook_rules WHERE event_type <> '' ORDER BY event_type ASC`)
+	if err != nil {
+		return RuleFilterOptions{}, fmt.Errorf("list distinct event_type from webhook_rules: %w", err)
+	}
+	st, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT suggestion_type FROM webhook_rules WHERE suggestion_type <> '' ORDER BY suggestion_type ASC`)
+	if err != nil {
+		return RuleFilterOptions{}, fmt.Errorf("list distinct suggestion_type from webhook_rules: %w", err)
+	}
+	rows, err := s.pool.Query(ctx, `SELECT DISTINCT is_active FROM webhook_rules ORDER BY is_active DESC`)
+	if err != nil {
+		return RuleFilterOptions{}, fmt.Errorf("list distinct is_active from webhook_rules: %w", err)
+	}
+	defer rows.Close()
+	activeStates := make([]string, 0, 2)
+	for rows.Next() {
+		var v bool
+		if err := rows.Scan(&v); err != nil {
+			return RuleFilterOptions{}, fmt.Errorf("scan distinct is_active: %w", err)
+		}
+		if v {
+			activeStates = append(activeStates, "active")
+		} else {
+			activeStates = append(activeStates, "inactive")
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return RuleFilterOptions{}, fmt.Errorf("iterate distinct is_active: %w", err)
+	}
+	return RuleFilterOptions{EventTypes: et, SuggestionTypes: st, ActiveStates: activeStates}, nil
+}
+
 
 func (s *WebhookEventStore) CreateRule(ctx context.Context, rule RuleRecord) (int64, error) {
 	var id int64

@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -28,6 +29,8 @@ type mockRulesStore struct {
 	updatedID        int64
 	updatedIsActive  bool
 	updateShouldFail bool
+	filterOptions    store.RuleFilterOptions
+	filterErr        error
 }
 
 func (m *mockRulesStore) ListRules(_ context.Context, limit int, offset int, eventType string, keyword string, activeOnly bool) ([]store.RuleRecord, int64, error) {
@@ -37,6 +40,13 @@ func (m *mockRulesStore) ListRules(_ context.Context, limit int, offset int, eve
 	m.lastKey = keyword
 	m.lastActive = activeOnly
 	return m.items, m.total, nil
+}
+
+func (m *mockRulesStore) ListRuleFilterOptions(_ context.Context) (store.RuleFilterOptions, error) {
+	if m.filterErr != nil {
+		return store.RuleFilterOptions{}, m.filterErr
+	}
+	return m.filterOptions, nil
 }
 
 func (m *mockRulesStore) CreateRule(_ context.Context, rule store.RuleRecord) (int64, error) {
@@ -189,5 +199,48 @@ func TestRulesUpdateActive_BadRequest(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d, body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestRulesFilterOptions_Success(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	mockStore := &mockRulesStore{filterOptions: store.RuleFilterOptions{
+		EventTypes:      []string{"issues", "pull_request"},
+		SuggestionTypes: []string{"label", "comment"},
+		ActiveStates:    []string{"active", "inactive"},
+	}}
+	h := NewRulesHandler(mockStore)
+	r := gin.New()
+	r.GET("/rules/filter-options", h.FilterOptions)
+
+	req := httptest.NewRequest(http.MethodGet, "/rules/filter-options", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		OK      bool                    `json:"ok"`
+		Options store.RuleFilterOptions `json:"options"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if !resp.OK || len(resp.Options.EventTypes) != 2 || len(resp.Options.ActiveStates) != 2 {
+		t.Fatalf("unexpected response: %s", w.Body.String())
+	}
+}
+
+func TestRulesFilterOptions_StoreError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewRulesHandler(&mockRulesStore{filterErr: errors.New("boom")})
+	r := gin.New()
+	r.GET("/rules/filter-options", h.FilterOptions)
+
+	req := httptest.NewRequest(http.MethodGet, "/rules/filter-options", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d, body=%s", w.Code, w.Body.String())
 	}
 }

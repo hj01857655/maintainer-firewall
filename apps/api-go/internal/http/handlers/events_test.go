@@ -17,14 +17,16 @@ import (
 )
 
 type mockEventsStore struct {
-	items       []store.WebhookEventRecord
-	total       int64
-	lastLimit   int
-	lastOffset  int
-	lastType    string
-	lastAction  string
-	savedEvents []store.WebhookEvent
-	saveErr     error
+	items         []store.WebhookEventRecord
+	total         int64
+	lastLimit     int
+	lastOffset    int
+	lastType      string
+	lastAction    string
+	savedEvents   []store.WebhookEvent
+	saveErr       error
+	filterOptions store.EventFilterOptions
+	filterErr     error
 }
 
 func (m *mockEventsStore) ListEvents(_ context.Context, limit int, offset int, eventType string, action string) ([]store.WebhookEventRecord, int64, error) {
@@ -41,6 +43,13 @@ func (m *mockEventsStore) SaveEvent(_ context.Context, evt store.WebhookEvent) e
 	}
 	m.savedEvents = append(m.savedEvents, evt)
 	return nil
+}
+
+func (m *mockEventsStore) ListEventFilterOptions(_ context.Context) (store.EventFilterOptions, error) {
+	if m.filterErr != nil {
+		return store.EventFilterOptions{}, m.filterErr
+	}
+	return m.filterOptions, nil
 }
 
 type mockGitHubEventTypesProvider struct {
@@ -399,5 +408,49 @@ func TestEventsGitHubSyncStatus(t *testing.T) {
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 	if ok, _ := resp["ok"].(bool); !ok {
 		t.Fatalf("expected ok=true, body=%s", w.Body.String())
+	}
+}
+
+func TestEventsFilterOptions_Success(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	mockStore := &mockEventsStore{filterOptions: store.EventFilterOptions{
+		EventTypes:   []string{"IssuesEvent", "PushEvent"},
+		Actions:      []string{"opened", "pushed"},
+		Repositories: []string{"owner/repo"},
+		Senders:      []string{"alice"},
+	}}
+	h := NewEventsHandler(mockStore, &mockGitHubEventTypesProvider{})
+	r := gin.New()
+	r.GET("/events/filter-options", h.FilterOptions)
+
+	req := httptest.NewRequest(http.MethodGet, "/events/filter-options", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		OK      bool                     `json:"ok"`
+		Options store.EventFilterOptions `json:"options"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if !resp.OK || len(resp.Options.EventTypes) != 2 || len(resp.Options.Actions) != 2 {
+		t.Fatalf("unexpected response: %s", w.Body.String())
+	}
+}
+
+func TestEventsFilterOptions_StoreError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewEventsHandler(&mockEventsStore{filterErr: errors.New("boom")}, &mockGitHubEventTypesProvider{})
+	r := gin.New()
+	r.GET("/events/filter-options", h.FilterOptions)
+
+	req := httptest.NewRequest(http.MethodGet, "/events/filter-options", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d, body=%s", w.Code, w.Body.String())
 	}
 }

@@ -70,9 +70,12 @@ func main() {
 	api := r.Group("/")
 	api.Use(handlers.AuthMiddleware(cfg.JWTSecret))
 	api.GET("/events", eventsHandler.List)
+	api.GET("/events/filter-options", eventsHandler.FilterOptions)
 	api.GET("/events/sync-status", eventsHandler.GitHubSyncStatus)
 	api.GET("/alerts", alertsHandler.List)
+	api.GET("/alerts/filter-options", alertsHandler.FilterOptions)
 	api.GET("/rules", rulesHandler.List)
+	api.GET("/rules/filter-options", rulesHandler.FilterOptions)
 	api.POST("/rules", rulesHandler.Create)
 	api.PATCH("/rules/:id/active", rulesHandler.UpdateActive)
 

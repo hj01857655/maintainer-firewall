@@ -15,6 +15,7 @@ import (
 
 type RuleManager interface {
 	ListRules(ctx context.Context, limit int, offset int, eventType string, keyword string, activeOnly bool) ([]store.RuleRecord, int64, error)
+	ListRuleFilterOptions(ctx context.Context) (store.RuleFilterOptions, error)
 	CreateRule(ctx context.Context, rule store.RuleRecord) (int64, error)
 	UpdateRuleActive(ctx context.Context, id int64, isActive bool) error
 	SaveAuditLog(ctx context.Context, item store.AuditLogRecord) error
@@ -93,6 +94,21 @@ func (h *RulesHandler) List(c *gin.Context) {
 		Keyword:    keyword,
 		ActiveOnly: activeOnly,
 	})
+}
+
+func (h *RulesHandler) FilterOptions(c *gin.Context) {
+	if h.Store == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "message": "rule store is not configured"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+	options, err := h.Store.ListRuleFilterOptions(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "message": fmt.Sprintf("list rule filter options failed: %v", err)})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "options": options})
 }
 
 func (h *RulesHandler) Create(c *gin.Context) {

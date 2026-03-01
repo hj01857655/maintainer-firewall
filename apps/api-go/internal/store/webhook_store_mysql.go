@@ -246,6 +246,105 @@ func (s *MySQLWebhookEventStore) ListRules(ctx context.Context, limit int, offse
 	return items, total, nil
 }
 
+func listDistinctNonEmptyMySQL(ctx context.Context, db *sql.DB, q string) ([]string, error) {
+	rows, err := db.QueryContext(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]string, 0, 32)
+	for rows.Next() {
+		var v string
+		if err := rows.Scan(&v); err != nil {
+			return nil, err
+		}
+		v = strings.TrimSpace(v)
+		if v != "" {
+			out = append(out, v)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (s *MySQLWebhookEventStore) ListEventFilterOptions(ctx context.Context) (EventFilterOptions, error) {
+	et, err := listDistinctNonEmptyMySQL(ctx, s.db, `SELECT DISTINCT event_type FROM webhook_events WHERE event_type <> '' ORDER BY event_type ASC`)
+	if err != nil {
+		return EventFilterOptions{}, fmt.Errorf("list distinct event_type from webhook_events: %w", err)
+	}
+	ac, err := listDistinctNonEmptyMySQL(ctx, s.db, `SELECT DISTINCT action FROM webhook_events WHERE action <> '' ORDER BY action ASC`)
+	if err != nil {
+		return EventFilterOptions{}, fmt.Errorf("list distinct action from webhook_events: %w", err)
+	}
+	repo, err := listDistinctNonEmptyMySQL(ctx, s.db, `SELECT DISTINCT repository_full_name FROM webhook_events WHERE repository_full_name <> '' ORDER BY repository_full_name ASC`)
+	if err != nil {
+		return EventFilterOptions{}, fmt.Errorf("list distinct repository from webhook_events: %w", err)
+	}
+	sender, err := listDistinctNonEmptyMySQL(ctx, s.db, `SELECT DISTINCT sender_login FROM webhook_events WHERE sender_login <> '' ORDER BY sender_login ASC`)
+	if err != nil {
+		return EventFilterOptions{}, fmt.Errorf("list distinct sender from webhook_events: %w", err)
+	}
+	return EventFilterOptions{EventTypes: et, Actions: ac, Repositories: repo, Senders: sender}, nil
+}
+
+func (s *MySQLWebhookEventStore) ListAlertFilterOptions(ctx context.Context) (AlertFilterOptions, error) {
+	et, err := listDistinctNonEmptyMySQL(ctx, s.db, `SELECT DISTINCT event_type FROM webhook_alerts WHERE event_type <> '' ORDER BY event_type ASC`)
+	if err != nil {
+		return AlertFilterOptions{}, fmt.Errorf("list distinct event_type from webhook_alerts: %w", err)
+	}
+	ac, err := listDistinctNonEmptyMySQL(ctx, s.db, `SELECT DISTINCT action FROM webhook_alerts WHERE action <> '' ORDER BY action ASC`)
+	if err != nil {
+		return AlertFilterOptions{}, fmt.Errorf("list distinct action from webhook_alerts: %w", err)
+	}
+	st, err := listDistinctNonEmptyMySQL(ctx, s.db, `SELECT DISTINCT suggestion_type FROM webhook_alerts WHERE suggestion_type <> '' ORDER BY suggestion_type ASC`)
+	if err != nil {
+		return AlertFilterOptions{}, fmt.Errorf("list distinct suggestion_type from webhook_alerts: %w", err)
+	}
+	repo, err := listDistinctNonEmptyMySQL(ctx, s.db, `SELECT DISTINCT repository_full_name FROM webhook_alerts WHERE repository_full_name <> '' ORDER BY repository_full_name ASC`)
+	if err != nil {
+		return AlertFilterOptions{}, fmt.Errorf("list distinct repository from webhook_alerts: %w", err)
+	}
+	sender, err := listDistinctNonEmptyMySQL(ctx, s.db, `SELECT DISTINCT sender_login FROM webhook_alerts WHERE sender_login <> '' ORDER BY sender_login ASC`)
+	if err != nil {
+		return AlertFilterOptions{}, fmt.Errorf("list distinct sender from webhook_alerts: %w", err)
+	}
+	return AlertFilterOptions{EventTypes: et, Actions: ac, SuggestionTypes: st, Repositories: repo, Senders: sender}, nil
+}
+
+func (s *MySQLWebhookEventStore) ListRuleFilterOptions(ctx context.Context) (RuleFilterOptions, error) {
+	et, err := listDistinctNonEmptyMySQL(ctx, s.db, `SELECT DISTINCT event_type FROM webhook_rules WHERE event_type <> '' ORDER BY event_type ASC`)
+	if err != nil {
+		return RuleFilterOptions{}, fmt.Errorf("list distinct event_type from webhook_rules: %w", err)
+	}
+	st, err := listDistinctNonEmptyMySQL(ctx, s.db, `SELECT DISTINCT suggestion_type FROM webhook_rules WHERE suggestion_type <> '' ORDER BY suggestion_type ASC`)
+	if err != nil {
+		return RuleFilterOptions{}, fmt.Errorf("list distinct suggestion_type from webhook_rules: %w", err)
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT is_active FROM webhook_rules ORDER BY is_active DESC`)
+	if err != nil {
+		return RuleFilterOptions{}, fmt.Errorf("list distinct is_active from webhook_rules: %w", err)
+	}
+	defer rows.Close()
+	activeStates := make([]string, 0, 2)
+	for rows.Next() {
+		var v bool
+		if err := rows.Scan(&v); err != nil {
+			return RuleFilterOptions{}, fmt.Errorf("scan distinct is_active: %w", err)
+		}
+		if v {
+			activeStates = append(activeStates, "active")
+		} else {
+			activeStates = append(activeStates, "inactive")
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return RuleFilterOptions{}, fmt.Errorf("iterate distinct is_active: %w", err)
+	}
+	return RuleFilterOptions{EventTypes: et, SuggestionTypes: st, ActiveStates: activeStates}, nil
+}
+
 func (s *MySQLWebhookEventStore) CreateRule(ctx context.Context, rule RuleRecord) (int64, error) {
 	result, err := s.db.ExecContext(ctx, `
 		INSERT INTO webhook_rules (event_type, keyword, suggestion_type, suggestion_value, reason, is_active)
