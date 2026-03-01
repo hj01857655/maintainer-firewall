@@ -127,15 +127,15 @@ export function AlertsPage() {
 
   return (
     <section className="space-y-4">
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
-        <h1 className="m-0 text-2xl font-semibold tracking-tight text-slate-900">{t('alerts.title')}</h1>
-        <p className="mt-2 text-sm leading-relaxed text-slate-600">{t('alerts.subtitle')}</p>
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:p-6 dark:border-slate-700 dark:bg-slate-900/80 dark:shadow-xl">
+        <h1 className="m-0 text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">{t('alerts.title')}</h1>
+        <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300">{t('alerts.subtitle')}</p>
 
         <div className="mt-4 grid gap-3 md:grid-cols-4">
-          <label className="block text-sm font-medium text-slate-700">
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
             <span>{t('alerts.filters.eventType')}</span>
             <select
-              className="mt-2 h-11 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 outline-none transition-colors duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              className="mt-2 h-11 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 outline-none transition-colors duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-400/20"
               value={eventTypeFilter}
               onChange={(e) => {
                 setOffset(0)
@@ -150,10 +150,10 @@ export function AlertsPage() {
             </select>
           </label>
 
-          <label className="block text-sm font-medium text-slate-700">
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
             <span>{t('alerts.filters.action')}</span>
             <select
-              className="mt-2 h-11 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 outline-none transition-colors duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              className="mt-2 h-11 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 outline-none transition-colors duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-400/20"
               value={actionFilter}
               onChange={(e) => {
                 setOffset(0)
@@ -168,10 +168,10 @@ export function AlertsPage() {
             </select>
           </label>
 
-          <label className="block text-sm font-medium text-slate-700">
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
             <span>{t('alerts.filters.suggestionType')}</span>
             <select
-              className="mt-2 h-11 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 outline-none transition-colors duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              className="mt-2 h-11 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 outline-none transition-colors duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-400/20"
               value={suggestionTypeFilter}
               onChange={(e) => {
                 setOffset(0)
@@ -198,9 +198,9 @@ export function AlertsPage() {
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white/95 shadow-sm">
+      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white/95 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:shadow-xl">
         <table className="min-w-[1120px] w-full text-sm">
-          <thead className="bg-slate-50 text-slate-700">
+          <thead className="bg-slate-50 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
             <tr>
               <th className="px-3 py-3 text-left font-semibold">{t('alerts.table.delivery')}</th>
               <th className="px-3 py-3 text-left font-semibold">{t('alerts.table.type')}</th>
@@ -219,26 +219,26 @@ export function AlertsPage() {
             {alerts.map((item) => (
               <tr
                 key={`${item.delivery_id}-${item.suggestion_type}-${item.suggestion_value}-${item.rule_matched}`}
-                className="border-t border-slate-200 hover:bg-slate-50/70"
+                className="border-t border-slate-200 hover:bg-slate-50/70 dark:border-slate-700 dark:hover:bg-slate-800/50"
               >
-                <td className="px-3 py-3 text-slate-900">{item.delivery_id}</td>
-                <td className="px-3 py-3 text-slate-900">{item.event_type}</td>
-                <td className="px-3 py-3 text-slate-900">{item.action || '-'}</td>
-                <td className="px-3 py-3 text-slate-900">{item.suggestion_type}</td>
-                <td className="px-3 py-3 text-slate-900">{item.suggestion_value}</td>
-                <td className="px-3 py-3 text-slate-900">{item.rule_matched}</td>
-                <td className="px-3 py-3 text-slate-900">{item.reason}</td>
-                <td className="px-3 py-3 text-slate-900">{item.repository_full_name}</td>
-                <td className="px-3 py-3 text-slate-900">{item.sender_login}</td>
-                <td className="px-3 py-3 text-slate-900">{new Date(item.created_at).toLocaleString()}</td>
-                <td className="px-3 py-3 text-slate-900">
+                <td className="px-3 py-3 text-slate-900 dark:text-slate-100">{item.delivery_id}</td>
+                <td className="px-3 py-3 text-slate-900 dark:text-slate-100">{item.event_type}</td>
+                <td className="px-3 py-3 text-slate-900 dark:text-slate-100">{item.action || '-'}</td>
+                <td className="px-3 py-3 text-slate-900 dark:text-slate-100">{item.suggestion_type}</td>
+                <td className="px-3 py-3 text-slate-900 dark:text-slate-100">{item.suggestion_value}</td>
+                <td className="px-3 py-3 text-slate-900 dark:text-slate-100">{item.rule_matched}</td>
+                <td className="px-3 py-3 text-slate-900 dark:text-slate-100">{item.reason}</td>
+                <td className="px-3 py-3 text-slate-900 dark:text-slate-100">{item.repository_full_name}</td>
+                <td className="px-3 py-3 text-slate-900 dark:text-slate-100">{item.sender_login}</td>
+                <td className="px-3 py-3 text-slate-900 dark:text-slate-100">{new Date(item.created_at).toLocaleString()}</td>
+                <td className="px-3 py-3 text-slate-900 dark:text-slate-100">
                   <Link
                     to={`/rules?${new URLSearchParams({
                       event_type: item.event_type,
                       keyword: item.rule_matched,
                       active_only: 'false',
                     }).toString()}`}
-                    className="inline-flex min-h-9 cursor-pointer items-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition-colors duration-200 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                    className="inline-flex min-h-9 cursor-pointer items-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition-colors duration-200 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                   >
                     {t('alerts.table.goRules')}
                   </Link>
@@ -249,11 +249,11 @@ export function AlertsPage() {
         </table>
       </div>
 
-      {alerts.length === 0 ? <p className="text-sm text-slate-600">{t('alerts.empty')}</p> : null}
+      {alerts.length === 0 ? <p className="text-sm text-slate-600 dark:text-slate-300">{t('alerts.empty')}</p> : null}
 
       <div className="flex flex-wrap items-center gap-2">
         <button
-          className="h-11 min-w-[88px] cursor-pointer rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+          className="h-11 min-w-[88px] cursor-pointer rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
           onClick={() => setOffset((v) => Math.max(0, v - limit))}
           disabled={offset === 0}
           aria-label={t('common.prev')}
@@ -261,17 +261,17 @@ export function AlertsPage() {
           {t('common.prev')}
         </button>
         <button
-          className="h-11 min-w-[88px] cursor-pointer rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+          className="h-11 min-w-[88px] cursor-pointer rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
           onClick={() => setOffset((v) => v + limit)}
           disabled={currentPage >= totalPages}
           aria-label={t('common.next')}
         >
           {t('common.next')}
         </button>
-        <span className="text-sm text-slate-600">{t('common.pageSummary', { current: currentPage, total: totalPages, count: total })}</span>
+        <span className="text-sm text-slate-600 dark:text-slate-300">{t('common.pageSummary', { current: currentPage, total: totalPages, count: total })}</span>
       </div>
 
-      {error ? <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">{t('common.error', { message: error })}</p> : null}
+      {error ? <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300">{t('common.error', { message: error })}</p> : null}
     </section>
   )
 }

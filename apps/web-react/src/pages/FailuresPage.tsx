@@ -82,10 +82,10 @@ export function FailuresPage() {
 
   return (
     <section className="space-y-4">
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
-        <h1 className="m-0 text-2xl font-semibold tracking-tight text-slate-900">{t('failures.title')}</h1>
-        <p className="mt-2 text-sm leading-relaxed text-slate-600">{t('failures.subtitle')}</p>
-        <label className="mt-3 inline-flex min-h-11 cursor-pointer items-center gap-2 text-sm text-slate-700">
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:p-6 dark:border-slate-700 dark:bg-slate-900/80 dark:shadow-xl">
+        <h1 className="m-0 text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">{t('failures.title')}</h1>
+        <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300">{t('failures.subtitle')}</p>
+        <label className="mt-3 inline-flex min-h-11 cursor-pointer items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
           <input
             type="checkbox"
             checked={includeResolved}
@@ -98,15 +98,15 @@ export function FailuresPage() {
           <span>{t('failures.includeResolved')}</span>
         </label>
         {!githubTokenConfigured ? (
-          <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+          <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
             {t('failures.tokenMissing')}
           </p>
         ) : null}
       </div>
 
-      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white/95 shadow-sm">
+      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white/95 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:shadow-xl">
         <table className="min-w-[1200px] w-full text-sm">
-          <thead className="bg-slate-100 text-slate-700">
+          <thead className="bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
             <tr>
               <th className="px-3 py-2 text-left">{t('failures.table.id')}</th>
               <th className="px-3 py-2 text-left">{t('failures.table.delivery')}</th>
@@ -122,30 +122,30 @@ export function FailuresPage() {
           </thead>
           <tbody>
             {items.map((item) => (
-              <tr key={item.id} className="border-t border-slate-200 hover:bg-slate-50/70">
-                 <td className="px-3 py-2 text-slate-900">{item.id}</td>
-                 <td className="px-3 py-2 text-slate-900">{item.delivery_id}</td>
-                 <td className="px-3 py-2 text-slate-900">{item.event_type}</td>
-                 <td className="px-3 py-2 text-slate-900">{item.action}</td>
-                 <td className="px-3 py-2 text-slate-900">{item.repository_full_name}</td>
-                 <td className="px-3 py-2 text-slate-900">{item.suggestion_type}:{item.suggestion_value}</td>
-                 <td className="px-3 py-2 text-slate-900">{item.attempt_count} / retry {item.retry_count}</td>
-                 <td className="px-3 py-2 max-w-[420px] break-words text-slate-900">
+              <tr key={item.id} className="border-t border-slate-200 hover:bg-slate-50/70 dark:border-slate-700 dark:hover:bg-slate-800/50">
+                 <td className="px-3 py-2 text-slate-900 dark:text-slate-100">{item.id}</td>
+                 <td className="px-3 py-2 text-slate-900 dark:text-slate-100">{item.delivery_id}</td>
+                 <td className="px-3 py-2 text-slate-900 dark:text-slate-100">{item.event_type}</td>
+                 <td className="px-3 py-2 text-slate-900 dark:text-slate-100">{item.action}</td>
+                 <td className="px-3 py-2 text-slate-900 dark:text-slate-100">{item.repository_full_name}</td>
+                 <td className="px-3 py-2 text-slate-900 dark:text-slate-100">{item.suggestion_type}:{item.suggestion_value}</td>
+                 <td className="px-3 py-2 text-slate-900 dark:text-slate-100">{item.attempt_count} / retry {item.retry_count}</td>
+                 <td className="px-3 py-2 max-w-[420px] break-words text-slate-900 dark:text-slate-100">
                   <div>{item.error_message}</div>
-                  <div className="mt-1 text-xs text-slate-500">
+                  <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                     {t('failures.table.last')}: {item.last_retry_status}
                     {item.last_retry_message ? ` · ${item.last_retry_message}` : ''}
                   </div>
                 </td>
-                <td className="px-3 py-2">{new Date(item.occurred_at).toLocaleString()}</td>
+                <td className="px-3 py-2 text-slate-900 dark:text-slate-100">{new Date(item.occurred_at).toLocaleString()}</td>
                 <td className="px-3 py-2">
                   {item.is_resolved ? (
-                    <span className="inline-flex rounded-lg border border-green-200 bg-green-50 px-2 py-1 text-xs font-semibold text-green-700">{t('failures.status.resolved')}</span>
+                    <span className="inline-flex rounded-lg border border-green-200 bg-green-50 px-2 py-1 text-xs font-semibold text-green-700 dark:border-green-500/40 dark:bg-green-500/10 dark:text-green-200">{t('failures.status.resolved')}</span>
                   ) : (
                     <button
                       type="button"
                       disabled={retryingId === item.id || !githubTokenConfigured}
-                      className="h-9 min-w-[96px] cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition-colors duration-200 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="h-9 min-w-[96px] cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition-colors duration-200 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                       onClick={async () => {
                         setRetryingId(item.id)
                         setError('')
@@ -180,7 +180,7 @@ export function FailuresPage() {
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
-          className="h-11 min-w-[88px] cursor-pointer rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+          className="h-11 min-w-[88px] cursor-pointer rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
           onClick={() => setOffset((v) => Math.max(0, v - limit))}
           disabled={offset === 0}
         >
@@ -188,17 +188,17 @@ export function FailuresPage() {
         </button>
         <button
           type="button"
-          className="h-11 min-w-[88px] cursor-pointer rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+          className="h-11 min-w-[88px] cursor-pointer rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
           onClick={() => setOffset((v) => v + limit)}
           disabled={currentPage >= totalPages}
         >
           {t('common.next')}
         </button>
-        <span className="text-sm text-slate-600">{t('common.pageSummary', { current: currentPage, total: totalPages, count: total })}</span>
+        <span className="text-sm text-slate-600 dark:text-slate-300">{t('common.pageSummary', { current: currentPage, total: totalPages, count: total })}</span>
       </div>
 
-      {items.length === 0 ? <p className="text-sm text-slate-600">{t('common.empty')}</p> : null}
-      {error ? <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">{t('common.error', { message: error })}</p> : null}
+      {items.length === 0 ? <p className="text-sm text-slate-600 dark:text-slate-300">{t('common.empty')}</p> : null}
+      {error ? <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300">{t('common.error', { message: error })}</p> : null}
     </section>
   )
 }

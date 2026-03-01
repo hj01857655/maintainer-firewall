@@ -97,13 +97,13 @@ export function SystemConfigPage() {
 
   return (
     <section className="space-y-4">
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
-        <h1 className="m-0 text-2xl font-semibold tracking-tight text-slate-900">{t('config.title')}</h1>
-        <p className="mt-2 text-sm leading-relaxed text-slate-600">{t('config.subtitle')}</p>
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:p-6 dark:border-slate-700 dark:bg-slate-900/80 dark:shadow-xl">
+        <h1 className="m-0 text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">{t('config.title')}</h1>
+        <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300">{t('config.subtitle')}</p>
       </div>
 
-      <form onSubmit={onSave} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
-        {loading ? <p className="text-sm text-slate-600">{t('common.loading')}</p> : null}
+      <form onSubmit={onSave} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:p-6 dark:border-slate-700 dark:bg-slate-900/80 dark:shadow-xl">
+        {loading ? <p className="text-sm text-slate-600 dark:text-slate-300">{t('common.loading')}</p> : null}
 
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <Field label="DATABASE_URL" value={databaseURL} onChange={setDatabaseURL} placeholder="mysql://..." required />
@@ -123,8 +123,8 @@ export function SystemConfigPage() {
         </button>
       </form>
 
-      {message ? <p className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">{message}</p> : null}
-      {error ? <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">{t('common.error', { message: error })}</p> : null}
+      {message ? <p className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700 dark:border-green-500/40 dark:bg-green-500/10 dark:text-green-200">{message}</p> : null}
+      {error ? <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300">{t('common.error', { message: error })}</p> : null}
     </section>
   )
 }
@@ -139,10 +139,10 @@ type FieldProps = {
 
 function Field({ label, value, onChange, placeholder, required }: FieldProps) {
   return (
-    <label className="block text-sm font-medium text-slate-700">
+    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
       <span>{label}</span>
       <input
-        className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3 text-base text-slate-900 outline-none transition-colors duration-200 placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+        className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3 text-base text-slate-900 outline-none transition-colors duration-200 placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-blue-400 dark:focus:ring-blue-400/20"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
@@ -161,11 +161,11 @@ type SecretFieldProps = {
 
 function SecretField({ label, value, onChange, masked }: SecretFieldProps) {
   return (
-    <label className="block text-sm font-medium text-slate-700">
+    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
       <span>{label}</span>
       <input
         type="password"
-        className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3 text-base text-slate-900 outline-none transition-colors duration-200 placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+        className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3 text-base text-slate-900 outline-none transition-colors duration-200 placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-blue-400 dark:focus:ring-blue-400/20"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={masked || '******'}

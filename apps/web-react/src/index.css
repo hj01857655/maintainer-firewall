@@ -38,9 +38,37 @@ html.dark body {
 }
 
 /* dark-mode utility bridge: keep existing pages readable without rewriting every component */
-html.dark .bg-white,
+html.dark .bg-white {
+  background-color: rgba(15, 23, 42, 0.95) !important;
+}
+
 html.dark .bg-white\/95 {
   background-color: rgba(15, 23, 42, 0.95) !important;
+}
+
+html.dark .bg-slate-900\/95 {
+  background-color: rgba(15, 23, 42, 0.95) !important;
+}
+
+html.dark .bg-slate-950\/95 {
+  background-color: rgba(2, 6, 23, 0.95) !important;
+}
+
+/* 导航项特殊处理 - 使用更高优先级 */
+html.dark nav .bg-white\/60 {
+  background-color: rgba(30, 41, 59, 0.9) !important;
+}
+
+html.dark nav .text-slate-600 {
+  color: #cbd5e1 !important;
+}
+
+html.dark nav .text-slate-300 {
+  color: #d1d5db !important;
+}
+
+html.dark nav .text-slate-400 {
+  color: #9ca3af !important;
 }
 
 html.dark .bg-slate-50,
@@ -67,12 +95,28 @@ html.dark .text-slate-500 {
   color: #94a3b8 !important;
 }
 
+html.dark .text-slate-300 {
+  color: #cbd5e1 !important;
+}
+
+html.dark .text-slate-400 {
+  color: #94a3b8 !important;
+}
+
 html.dark .border-slate-200 {
   border-color: #334155 !important;
 }
 
 html.dark .border-slate-300 {
   border-color: #475569 !important;
+}
+
+html.dark .border-slate-700 {
+  border-color: #334155 !important;
+}
+
+html.dark .border-slate-800 {
+  border-color: #1e293b !important;
 }
 
 html.dark [class*='placeholder:text-slate-400']::placeholder {
@@ -82,6 +126,19 @@ html.dark [class*='placeholder:text-slate-400']::placeholder {
 html.dark [class*='hover:bg-slate-50']:hover,
 html.dark [class*='hover:bg-slate-100']:hover {
   background-color: rgba(51, 65, 85, 0.72) !important;
+}
+
+html.dark .bg-slate-700 {
+  background-color: #334155 !important;
+}
+
+html.dark .bg-slate-800 {
+  background-color: #1e293b !important;
+}
+
+html.dark [class*='hover:bg-slate-700']:hover,
+html.dark [class*='hover:bg-slate-800']:hover {
+  background-color: #334155 !important;
 }
 
 html.dark .bg-red-50 {

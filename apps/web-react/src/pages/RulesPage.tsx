@@ -181,23 +181,23 @@ export function RulesPage() {
 
   return (
     <section className="space-y-4">
-      <div className="rounded-2xl border border-slate-200 bg-white/95 p-5 shadow-sm md:p-6">
-        <h1 className="m-0 text-2xl font-semibold tracking-tight text-slate-900">{t('rules.title')}</h1>
-        <p className="mt-2 text-sm leading-relaxed text-slate-600">{t('rules.subtitle')}</p>
+      <div className="rounded-2xl border border-slate-200 bg-white/95 p-5 shadow-sm md:p-6 dark:border-slate-700 dark:bg-slate-900/80 dark:shadow-xl">
+        <h1 className="m-0 text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">{t('rules.title')}</h1>
+        <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300">{t('rules.subtitle')}</p>
       </div>
 
-      <form onSubmit={onCreateRule} className="rounded-2xl border border-slate-200 bg-white/95 p-5 shadow-sm md:p-6">
-        <h2 className="m-0 text-lg font-semibold text-slate-900">{t('rules.create.title')}</h2>
+      <form onSubmit={onCreateRule} className="rounded-2xl border border-slate-200 bg-white/95 p-5 shadow-sm md:p-6 dark:border-slate-700 dark:bg-slate-900/80 dark:shadow-xl">
+        <h2 className="m-0 text-lg font-semibold text-slate-900 dark:text-slate-100">{t('rules.create.title')}</h2>
         {(searchParams.get('keyword') || searchParams.get('event_type')) ? (
-          <p className="mt-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700">
+          <p className="mt-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700 dark:border-blue-500/40 dark:bg-blue-500/10 dark:text-blue-200">
             {t('rules.filters.prefilledHint')}
           </p>
         ) : null}
         <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-          <label className="block text-sm font-medium text-slate-700">
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
             <span>{t('rules.create.eventType')}</span>
             <select
-              className="mt-2 h-11 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 outline-none transition-colors duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              className="mt-2 h-11 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 outline-none transition-colors duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-400/20"
               value={formEventType}
               onChange={(e) => setFormEventType(e.target.value as 'issues' | 'pull_request')}
             >
@@ -206,10 +206,10 @@ export function RulesPage() {
             </select>
           </label>
 
-          <label className="block text-sm font-medium text-slate-700">
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
             <span>{t('rules.create.keyword')}</span>
             <input
-              className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3 text-base text-slate-900 outline-none transition-colors duration-200 placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3 text-base text-slate-900 outline-none transition-colors duration-200 placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-blue-400 dark:focus:ring-blue-400/20"
               value={formKeyword}
               onChange={(e) => setFormKeyword(e.target.value)}
               placeholder={t('rules.create.keywordPlaceholder')}
@@ -217,10 +217,10 @@ export function RulesPage() {
             />
           </label>
 
-          <label className="block text-sm font-medium text-slate-700">
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
             <span>{t('rules.create.suggestionType')}</span>
             <select
-              className="mt-2 h-11 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 outline-none transition-colors duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              className="mt-2 h-11 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 outline-none transition-colors duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-400/20"
               value={formSuggestionType}
               onChange={(e) => setFormSuggestionType(e.target.value as 'label' | 'comment')}
             >
@@ -229,10 +229,10 @@ export function RulesPage() {
             </select>
           </label>
 
-          <label className="block text-sm font-medium text-slate-700">
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
             <span>{t('rules.create.suggestionValue')}</span>
             <input
-              className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3 text-base text-slate-900 outline-none transition-colors duration-200 placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3 text-base text-slate-900 outline-none transition-colors duration-200 placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-blue-400 dark:focus:ring-blue-400/20"
               value={formSuggestionValue}
               onChange={(e) => setFormSuggestionValue(e.target.value)}
               placeholder={t('rules.create.suggestionValuePlaceholder')}
@@ -240,10 +240,10 @@ export function RulesPage() {
             />
           </label>
 
-          <label className="block text-sm font-medium text-slate-700 md:col-span-2">
+          <label className="block text-sm font-medium text-slate-700 md:col-span-2 dark:text-slate-300">
             <span>{t('rules.create.reason')}</span>
             <input
-              className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3 text-base text-slate-900 outline-none transition-colors duration-200 placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3 text-base text-slate-900 outline-none transition-colors duration-200 placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-blue-400 dark:focus:ring-blue-400/20"
               value={formReason}
               onChange={(e) => setFormReason(e.target.value)}
               placeholder={t('rules.create.reasonPlaceholder')}
@@ -252,7 +252,7 @@ export function RulesPage() {
           </label>
         </div>
 
-        <label className="mt-4 inline-flex min-h-11 cursor-pointer items-center gap-2 text-sm text-slate-700">
+        <label className="mt-4 inline-flex min-h-11 cursor-pointer items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
           <input
             type="checkbox"
             checked={formIsActive}
@@ -273,12 +273,12 @@ export function RulesPage() {
         </div>
       </form>
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:p-6 dark:border-slate-700 dark:bg-slate-900/80 dark:shadow-xl">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-          <label className="block text-sm font-medium text-slate-700">
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
             <span>{t('rules.filters.eventType')}</span>
             <select
-              className="mt-2 h-11 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 outline-none transition-colors duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              className="mt-2 h-11 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 outline-none transition-colors duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-400/20"
               value={eventTypeFilter}
               onChange={(e) => {
                 setOffset(0)
@@ -293,10 +293,10 @@ export function RulesPage() {
             </select>
           </label>
 
-          <label className="block text-sm font-medium text-slate-700">
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
             <span>{t('rules.filters.keyword')}</span>
             <input
-              className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3 text-base text-slate-900 outline-none transition-colors duration-200 placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3 text-base text-slate-900 outline-none transition-colors duration-200 placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-blue-400 dark:focus:ring-blue-400/20"
               value={keywordFilter}
               onChange={(e) => {
                 setOffset(0)
@@ -306,7 +306,7 @@ export function RulesPage() {
             />
           </label>
 
-          <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 text-sm text-slate-700 md:pt-8">
+          <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 text-sm text-slate-700 md:pt-8 dark:text-slate-300">
             <input
               type="checkbox"
               checked={activeOnly}
@@ -334,9 +334,9 @@ export function RulesPage() {
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white/95 shadow-sm">
-        <table className="min-w-[1120px] w-full text-sm">
-          <thead className="bg-slate-100 text-slate-700">
+      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white/95 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:shadow-xl">
+        <table className="min-w-[1200px] w-full text-sm">
+          <thead className="bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
             <tr>
               <th className="px-3 py-2 text-left">ID</th>
               <th className="px-3 py-2 text-left">{t('rules.table.eventType')}</th>
@@ -351,21 +351,21 @@ export function RulesPage() {
           </thead>
           <tbody>
             {rules.map((item) => (
-              <tr key={item.id} className="border-t border-slate-200 hover:bg-slate-50/70">
-                <td className="px-3 py-2">{item.id}</td>
-                <td className="px-3 py-2">{item.event_type}</td>
-                <td className="px-3 py-2">{item.keyword}</td>
-                <td className="px-3 py-2">{item.suggestion_type}</td>
-                <td className="px-3 py-2">{item.suggestion_value}</td>
-                <td className="px-3 py-2">{item.reason}</td>
-                <td className="px-3 py-2">{item.is_active ? t('rules.status.active') : t('rules.status.inactive')}</td>
-                <td className="px-3 py-2">{new Date(item.created_at).toLocaleString()}</td>
+              <tr key={item.id} className="border-t border-slate-200 hover:bg-slate-50/70 dark:border-slate-700 dark:hover:bg-slate-800/50">
+                <td className="px-3 py-2 text-slate-900 dark:text-slate-100">{item.id}</td>
+                <td className="px-3 py-2 text-slate-900 dark:text-slate-100">{item.event_type}</td>
+                <td className="px-3 py-2 text-slate-900 dark:text-slate-100">{item.keyword}</td>
+                <td className="px-3 py-2 text-slate-900 dark:text-slate-100">{item.suggestion_type}</td>
+                <td className="px-3 py-2 text-slate-900 dark:text-slate-100">{item.suggestion_value}</td>
+                <td className="px-3 py-2 text-slate-900 dark:text-slate-100">{item.reason}</td>
+                <td className="px-3 py-2 text-slate-900 dark:text-slate-100">{item.is_active ? t('rules.status.active') : t('rules.status.inactive')}</td>
+                <td className="px-3 py-2 text-slate-900 dark:text-slate-100">{new Date(item.created_at).toLocaleString()}</td>
                 <td className="px-3 py-2">
                   <button
                     type="button"
                     disabled={togglingId === item.id}
                     onClick={() => void onToggleActive(item)}
-                    className="h-9 cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition-colors duration-200 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="h-9 cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition-colors duration-200 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                   >
                     {togglingId === item.id
                       ? t('rules.table.updating')
@@ -383,7 +383,7 @@ export function RulesPage() {
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
-          className="h-11 min-w-[88px] cursor-pointer rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+          className="h-11 min-w-[88px] cursor-pointer rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
           onClick={() => setOffset((v) => Math.max(0, v - limit))}
           disabled={offset === 0}
         >
@@ -391,17 +391,17 @@ export function RulesPage() {
         </button>
         <button
           type="button"
-          className="h-11 min-w-[88px] cursor-pointer rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+          className="h-11 min-w-[88px] cursor-pointer rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
           onClick={() => setOffset((v) => v + limit)}
           disabled={currentPage >= totalPages}
         >
           {t('common.next')}
         </button>
-        <span className="text-sm text-slate-600">{t('common.pageSummary', { current: currentPage, total: totalPages, count: total })}</span>
+        <span className="text-sm text-slate-600 dark:text-slate-300">{t('common.pageSummary', { current: currentPage, total: totalPages, count: total })}</span>
       </div>
 
-      {rules.length === 0 ? <p className="text-sm text-slate-500">{t('common.empty')}</p> : null}
-      {error ? <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">{t('common.error', { message: error })}</p> : null}
+      {rules.length === 0 ? <p className="text-sm text-slate-500 dark:text-slate-400">{t('common.empty')}</p> : null}
+      {error ? <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300">{t('common.error', { message: error })}</p> : null}
     </section>
   )
 }

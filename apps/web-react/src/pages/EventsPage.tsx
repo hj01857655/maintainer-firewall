@@ -250,15 +250,15 @@ export function EventsPage() {
 
   return (
     <section className="space-y-4">
-      <div className="rounded-2xl border border-slate-200 bg-white/95 p-5 shadow-sm md:p-6">
-        <h1 className="m-0 text-2xl font-semibold tracking-tight text-slate-900">{t('events.title')}</h1>
-        <p className="mt-2 text-sm leading-relaxed text-slate-600">{t('events.subtitle')}</p>
+      <div className="rounded-2xl border border-slate-200 bg-white/95 p-5 shadow-sm md:p-6 dark:border-slate-700 dark:bg-slate-900/80 dark:shadow-xl">
+        <h1 className="m-0 text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">{t('events.title')}</h1>
+        <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300">{t('events.subtitle')}</p>
 
         <div className="mt-4 grid gap-3 md:grid-cols-3">
-          <label className="block text-sm font-medium text-slate-700">
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
             <span>{t('events.filters.eventType')}</span>
             <select
-              className="mt-2 h-11 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 outline-none transition-colors duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              className="mt-2 h-11 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 outline-none transition-colors duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-400/20"
               value={eventTypeFilter}
               onChange={(e) => {
                 setOffset(0)
@@ -273,10 +273,10 @@ export function EventsPage() {
             </select>
           </label>
 
-          <label className="block text-sm font-medium text-slate-700">
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
             <span>{t('events.filters.action')}</span>
             <select
-              className="mt-2 h-11 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 outline-none transition-colors duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              className="mt-2 h-11 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 outline-none transition-colors duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-400/20"
               value={actionFilter}
               onChange={(e) => {
                 setOffset(0)
@@ -302,19 +302,19 @@ export function EventsPage() {
           </div>
         </div>
 
-        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="space-y-1 text-sm text-slate-700">
-              <p className="font-semibold text-slate-900">{t('events.sync.title')}</p>
+            <div className="space-y-1 text-sm text-slate-700 dark:text-slate-300">
+              <p className="font-semibold text-slate-900 dark:text-slate-100">{t('events.sync.title')}</p>
               <p>{t('events.sync.running')}: {syncStatus?.running ? t('events.sync.yes') : t('events.sync.no')}</p>
               <p>{t('events.sync.lastSuccess')}: {syncStatus?.last_success_at ? new Date(syncStatus.last_success_at).toLocaleString() : '-'}</p>
               <p>{t('events.sync.lastResult')}: {syncStatus ? `${syncStatus.last_saved} / ${syncStatus.last_total}` : '-'}</p>
               <p>{t('events.sync.stats')}: {syncStatus ? `${syncStatus.success_count} / ${syncStatus.failure_count}` : '-'}</p>
-              {syncStatus?.last_error ? <p className="text-red-600">{t('events.sync.lastError')}: {syncStatus.last_error}</p> : null}
+              {syncStatus?.last_error ? <p className="text-red-600 dark:text-red-400">{t('events.sync.lastError')}: {syncStatus.last_error}</p> : null}
             </div>
             <div className="flex w-full gap-2 md:w-auto">
               <button
-                className="h-11 min-w-[120px] cursor-pointer rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition-colors duration-200 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                className="h-11 min-w-[120px] cursor-pointer rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition-colors duration-200 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                 onClick={() => loadSyncStatus()}
                 aria-label={t('events.sync.refreshStatus')}
               >
@@ -350,13 +350,13 @@ export function EventsPage() {
               </button>
             </div>
           </div>
-          {syncMessage ? <p className="mt-2 text-sm text-emerald-700">{syncMessage}</p> : null}
+          {syncMessage ? <p className="mt-2 text-sm text-emerald-700 dark:text-emerald-400">{syncMessage}</p> : null}
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white/95 shadow-sm">
-        <table className="min-w-[1080px] w-full text-sm">
-          <thead className="bg-slate-50 text-slate-700">
+      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white/95 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:shadow-xl">
+        <table className="min-w-[1200px] w-full text-sm">
+          <thead className="bg-slate-50 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
             <tr>
               <th className="px-3 py-3 text-left font-semibold">{t('events.table.id')}</th>
               <th className="px-3 py-3 text-left font-semibold">{t('events.table.type')}</th>
@@ -373,29 +373,29 @@ export function EventsPage() {
               const repoUrl = toRepoUrl(evt)
               const target = extractTarget(evt)
               return (
-                <tr key={evt.id} className="border-t border-slate-200 hover:bg-slate-50/80">
-                  <td className="px-3 py-3 text-slate-900">{evt.id}</td>
-                  <td className="px-3 py-3 text-slate-900">{evt.event_type}</td>
-                  <td className="px-3 py-3 text-slate-900">{evt.action || '-'}</td>
-                  <td className="px-3 py-3 text-slate-900">
+                <tr key={evt.id} className="border-t border-slate-200 hover:bg-slate-50/80 dark:border-slate-700 dark:hover:bg-slate-800/50">
+                  <td className="px-3 py-3 text-slate-900 dark:text-slate-100">{evt.id}</td>
+                  <td className="px-3 py-3 text-slate-900 dark:text-slate-100">{evt.event_type}</td>
+                  <td className="px-3 py-3 text-slate-900 dark:text-slate-100">{evt.action || '-'}</td>
+                  <td className="px-3 py-3 text-slate-900 dark:text-slate-100">
                     {repoUrl ? (
-                      <a href={repoUrl} target="_blank" rel="noreferrer" className="cursor-pointer text-blue-600 transition-colors duration-200 hover:text-blue-700 hover:underline">
+                      <a href={repoUrl} target="_blank" rel="noreferrer" className="cursor-pointer text-blue-600 transition-colors duration-200 hover:text-blue-700 hover:underline dark:text-blue-400 dark:hover:text-blue-300">
                         {evt.repository_full_name}
                       </a>
                     ) : (
                       evt.repository_full_name
                     )}
                   </td>
-                  <td className="px-3 py-3 text-slate-900">
+                  <td className="px-3 py-3 text-slate-900 dark:text-slate-100">
                     {target.url ? (
-                      <a href={target.url} target="_blank" rel="noreferrer" className="cursor-pointer text-blue-600 transition-colors duration-200 hover:text-blue-700 hover:underline">
+                      <a href={target.url} target="_blank" rel="noreferrer" className="cursor-pointer text-blue-600 transition-colors duration-200 hover:text-blue-700 hover:underline dark:text-blue-400 dark:hover:text-blue-300">
                         {target.label}
                       </a>
                     ) : (
                       target.label
                     )}
                   </td>
-                  <td className="max-w-[420px] px-3 py-3 text-slate-900">
+                  <td className="max-w-[420px] px-3 py-3 text-slate-900 dark:text-slate-100">
                     <span className="line-clamp-2" title={target.summary}>{target.summary}</span>
                   </td>
                   <td className="px-3 py-3 text-slate-900">{evt.sender_login}</td>
