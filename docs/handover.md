@@ -37,7 +37,7 @@
    - Suggested actions (`label` / `comment`)
    - optional GitHub auto action execution via `GITHUB_TOKEN`
 5. Frontend pages
-   - login/dashboard/events/alerts
+   - login/dashboard/events/rules/alerts/failures/audit/system-config
    - protected route guard using bearer token
 6. Reliability hardening
    - action execution retry
@@ -77,7 +77,11 @@ maintainer-firewall/
 │     │  ├─ LoginPage.tsx
 │     │  ├─ DashboardPage.tsx
 │     │  ├─ EventsPage.tsx
-│     │  └─ AlertsPage.tsx
+│     │  ├─ RulesPage.tsx
+│     │  ├─ AlertsPage.tsx
+│     │  ├─ FailuresPage.tsx
+│     │  ├─ AuditLogsPage.tsx
+│     │  └─ SystemConfigPage.tsx
 │     ├─ package.json
 │     └─ vite.config.ts
 ├─ docs/
@@ -114,7 +118,7 @@ npm run dev
 Web app:
 
 - `http://localhost:5173`
-- login first, then access dashboard/events/alerts
+- login first, then access dashboard/events/rules/alerts
 
 ## Next Milestones (remaining)
 
@@ -130,7 +134,7 @@ Web app:
 - Rule hit trend snapshots
 - Better empty/error/loading states
 
-- End-to-end test: webhook -> events/alerts visible in UI
+- End-to-end test: webhook -> events/rules/alerts visible in UI
 
 ## Reopen IDE Quick Resume Checklist
 
@@ -138,7 +142,7 @@ Web app:
 2. Run `go test ./...` in `apps/api-go`
 3. Run `npm run build` in `apps/web-react`
 4. Run one-command demo from repo root: `./scripts/demo.ps1`
-5. Verify login + protected `/events` and `/alerts`
+5. Verify login + protected `/events` / `/rules` / `/alerts`
 6. Verify retry/failure record behavior for action execution path
 
 ## Notes

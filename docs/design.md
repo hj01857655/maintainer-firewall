@@ -11,7 +11,7 @@ This design covers M3, M4, M5-v1 and post-MVP hardening done in this branch:
 - M7: optional GitHub auto actions (label/comment) execution
 - M8: JWT login and protected API routes
 - M9: action retry + failure recording without blocking webhook acceptance
-- M11: extend existing `/events` with GitHub source pull and on-demand/periodic sync-to-DB (`source=github`, `sync=true`, scheduler)
+- M11: extend existing `/events` with GitHub source pull and on-demand/periodic sync-to-DB (`source=github`, `mode=types|items`, `sync=true`, `/events/sync-status`, scheduler)
 
 ## 2. Runtime Components
 
@@ -27,7 +27,7 @@ This design covers M3, M4, M5-v1 and post-MVP hardening done in this branch:
   - periodic scheduler for GitHub event sync
 - `internal/http/handlers`
   - request parsing, signature verification, event extraction, store call
-  - `/events` GitHub source mode + optional sync
+  - `/events` GitHub source mode (`mode=types|items`) + optional sync and `/events/sync-status`
 
 ## 3. Request/Data Flow
 
@@ -42,10 +42,12 @@ This design covers M3, M4, M5-v1 and post-MVP hardening done in this branch:
 9. If configured, handler executes GitHub actions (`label`/`comment`) via GitHub API
 10. Action execution uses retry policy and records failures when retries are exhausted
 11. Webhook still returns success after core persistence path completes
-12. `GET /events?source=github` pulls recent user events from GitHub and returns unique `event_types`
-13. `GET /events?source=github&sync=true` pulls recent user events and persists them into `webhook_events`
-14. If `GITHUB_EVENTS_SYNC_INTERVAL_MINUTES > 0`, background worker periodically invokes the same sync path
-15. React console calls `GET /events` / `GET /alerts` / `GET /rules`
+12. `GET /events?source=github` defaults to `mode=types` and returns unique `event_types`
+13. `GET /events?source=github&mode=items&limit=<n>&offset=<n>` returns paginated GitHub event items
+14. `GET /events?source=github&sync=true` pulls recent user events and persists them into `webhook_events`
+15. `GET /events/sync-status` exposes in-memory sync runtime status and last result counters
+16. If `GITHUB_EVENTS_SYNC_INTERVAL_MINUTES > 0`, background worker periodically invokes the same sync path
+17. React console calls `GET /events` / `GET /rules` / `GET /alerts` (navigation order aligned with workflow: Rules before Alerts)
 
 ## 4. Data Model
 
@@ -73,7 +75,7 @@ Indexes:
 - Bad body read / malformed JSON -> `400`
 - DB unavailable / insert failure -> `500`
 - Duplicate delivery id -> treated as success (`200`) for idempotency
-- `GET /events?source=github` provider/token issues -> `500/502` with clear message
+- `GET /events?source=github` (`mode=types|items`) provider/token issues -> `500/502` with clear message
 
 ## 6. Config
 
@@ -104,16 +106,19 @@ Automation config:
   - set `GITHUB_EVENTS_SYNC_INTERVAL_MINUTES=5`
   - observe server log `github events sync done: saved=... total=...`
   - verify `webhook_events` grows with `delivery_id` prefix `gh-` (idempotent on repeats)
+- GitHub source mode smoke:
+  - `GET /events?source=github` returns `mode=types` and non-empty `event_types`
+  - `GET /events?source=github&mode=items&limit=20&offset=0` returns `mode=items` and `items/total`
 - Login:
   - `POST /auth/login` returns JWT on valid credentials
   - protected APIs reject missing/invalid bearer token
 - Manual webhook smoke:
   - valid signature -> `200` and row inserted
   - invalid signature -> `401`, no row inserted
-- Events/Alerts/Rules listing:
+- Events/Rules/Alerts listing:
   - `GET /events?limit=20&offset=0&event_type=issues&action=opened` returns ordered filtered records
-  - `GET /alerts?...` returns matched suggestions with pagination total
   - `GET /rules?...` returns configurable rules list
+  - `GET /alerts?...` returns matched suggestions with pagination total
 
 ## 8. M4 Progress
 
@@ -121,12 +126,12 @@ Implemented:
 
 - API `GET /events` with pagination params `limit` and `offset`
 - API filtering by `event_type` and `action`
-- React event list page with filter inputs and page/total page display
+- React event list page with dynamic dropdown filters and page/total page display
 
 Next:
 
 - Add endpoint tests for list/query validation
-- Add server-side sorting and richer filters (repository/sender/date range)
+- Add server-side sorting and richer filters (repository/sender/date range, full-dataset filter options endpoint)
 
 ## 9. Rules + Automation + Auth (current)
 

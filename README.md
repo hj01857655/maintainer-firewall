@@ -2,12 +2,12 @@
 
 Go + React open-source project skeleton for maintainer workflow automation.
 
-Current status: webhook signature verification + DB event persistence (PostgreSQL/MySQL) + rule suggestion + alerts persistence + configurable rules + auto action execution + JWT-protected API/UI + action retry/failure recording + metrics/audit/config APIs + E2E acceptance script are implemented.
+Current status: webhook signature verification + DB event persistence (PostgreSQL/MySQL) + rule suggestion + alerts persistence + configurable rules + auto action execution + JWT-protected API/UI + action retry/failure recording + metrics/audit/config APIs + GitHub source mode (`mode=types|items`, sync + sync-status) + dynamic dropdown filters in console pages are implemented.
 
 ## Structure
 
 - `apps/api-go`: Go API service (Gin + PostgreSQL/MySQL event/alert store, supports auto-loading env from `.env` and auto-creating `.env` from `.env.example`)
-- `apps/web-react`: React console (Vite + TS + React Router, login/dashboard/events/alerts/rules/failures/audit/system-config pages)
+- `apps/web-react`: React console (Vite + TS + React Router, login/dashboard/events/rules/alerts/failures/audit/system-config pages)
 - `docs`: architecture/docs (requirements/design/handover)
 
 ## Run API
@@ -51,9 +51,13 @@ API endpoints:
 - `GET http://localhost:8080/events?limit=20&offset=0&event_type=issues&action=opened` (auth required)
   - response includes `total` for pagination
 - `GET http://localhost:8080/events?source=github` (auth required)
-  - pull current GitHub user recent events and return unique `event_types`
+  - default `mode=types`, return unique `event_types`
+- `GET http://localhost:8080/events?source=github&mode=items&limit=20&offset=0` (auth required)
+  - return paginated recent GitHub event items
 - `GET http://localhost:8080/events?source=github&sync=true` (auth required)
   - pull current GitHub user recent events and sync into `webhook_events`
+- `GET http://localhost:8080/events/sync-status` (auth required)
+  - return GitHub sync runtime status and last sync counters
 - `GET http://localhost:8080/alerts?limit=20&offset=0&event_type=issues&action=opened&suggestion_type=label` (auth required)
   - response includes `total` for pagination
 - `GET/POST http://localhost:8080/rules` (auth required)
@@ -169,18 +173,17 @@ Invoke-RestMethod "http://localhost:8080/audit-logs?limit=20&offset=0" -Headers 
 - Configurable rules API (`GET/POST /rules`, `PATCH /rules/:id/active`)
 - Auto execute GitHub actions (label/comment)
 - Action retry + failure recording (`webhook_action_failures`) + retry API
-- `/events` GitHub source mode (`source=github`) + on-demand sync (`sync=true`) + periodic sync worker
+- `/events` GitHub source mode (`source=github`, `mode=types|items`) + on-demand sync (`sync=true`) + `/events/sync-status` + periodic sync worker
 - Login + protected API/UI routes (JWT)
-- Query alerts/events with pagination/filter + `total`
+- Query events/rules/alerts with pagination/filter + `total`
 - Failures/audit/metrics/config APIs
-- Console pages: events/alerts/rules/failures/audit/system-config
+- Console pages: events/rules/alerts/failures/audit/system-config
 - CI checks for API/Web build
 
 ## Secondary (next)
 
-- Sync status API (last success/failed reason/count)
 - Dashboard alert summary widgets
-- Rich filters (repository/sender/date range)
+- Rich filters (repository/sender/date range, full-dataset filter options)
 - Export & reporting
 ## License
 
