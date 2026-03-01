@@ -149,6 +149,12 @@ func (h *AuthHandler) Login(c *gin.Context) {
 func AuthMiddleware(jwtSecret string) gin.HandlerFunc {
 	secret := strings.TrimSpace(jwtSecret)
 	return func(c *gin.Context) {
+		// 允许OPTIONS预检请求跳过认证
+		if c.Request.Method == http.MethodOptions {
+			c.Next()
+			return
+		}
+
 		if secret == "" {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"ok": false, "message": "auth token is not configured"})
 			return

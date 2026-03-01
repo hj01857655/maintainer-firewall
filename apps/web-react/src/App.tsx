@@ -1,7 +1,9 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { AppLayout } from './layout/AppLayout'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { QueryProvider } from './components/QueryProvider'
+import { initPerformanceMonitoring, collectPerformanceMetrics } from './utils/monitoring'
 
 // 懒加载页面组件
 const DashboardPage = lazy(() => import('./pages/DashboardPage').then(module => ({ default: module.DashboardPage })))
@@ -12,6 +14,8 @@ const FailuresPage = lazy(() => import('./pages/FailuresPage').then(module => ({
 const AuditLogsPage = lazy(() => import('./pages/AuditLogsPage').then(module => ({ default: module.AuditLogsPage })))
 const SystemConfigPage = lazy(() => import('./pages/SystemConfigPage').then(module => ({ default: module.SystemConfigPage })))
 const GuidePage = lazy(() => import('./pages/GuidePage').then(module => ({ default: module.GuidePage })))
+const UsersPage = lazy(() => import('./pages/UsersPage').then(module => ({ default: module.UsersPage })))
+const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage').then(module => ({ default: module.AnalyticsPage })))
 
 // 加载占位符组件
 function LoadingFallback() {
@@ -26,23 +30,37 @@ function LoadingFallback() {
 }
 
 export function App() {
+  useEffect(() => {
+    // 初始化性能监控
+    initPerformanceMonitoring()
+
+    // 收集初始性能指标
+    setTimeout(() => {
+      collectPerformanceMetrics()
+    }, 1000)
+  }, [])
+
   return (
     <ErrorBoundary>
-      <AppLayout>
-        <Suspense fallback={<LoadingFallback />}>
-          <Routes>
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="/dashboard" element={<DashboardPage />} />
-            <Route path="/events" element={<EventsPage />} />
-            <Route path="/alerts" element={<AlertsPage />} />
-            <Route path="/rules" element={<RulesPage />} />
-            <Route path="/failures" element={<FailuresPage />} />
-            <Route path="/audit" element={<AuditLogsPage />} />
-            <Route path="/system-config" element={<SystemConfigPage />} />
-            <Route path="/guide" element={<GuidePage />} />
-          </Routes>
-        </Suspense>
-      </AppLayout>
+      <QueryProvider>
+        <AppLayout>
+          <Suspense fallback={<LoadingFallback />}>
+            <Routes>
+              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/dashboard" element={<DashboardPage />} />
+              <Route path="/events" element={<EventsPage />} />
+              <Route path="/alerts" element={<AlertsPage />} />
+              <Route path="/rules" element={<RulesPage />} />
+              <Route path="/failures" element={<FailuresPage />} />
+              <Route path="/audit" element={<AuditLogsPage />} />
+              <Route path="/system-config" element={<SystemConfigPage />} />
+              <Route path="/users" element={<UsersPage />} />
+              <Route path="/analytics" element={<AnalyticsPage />} />
+              <Route path="/guide" element={<GuidePage />} />
+            </Routes>
+          </Suspense>
+        </AppLayout>
+      </QueryProvider>
     </ErrorBoundary>
   )
 }

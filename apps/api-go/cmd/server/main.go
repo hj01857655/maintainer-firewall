@@ -51,6 +51,7 @@ func main() {
 	}
 	alertsHandler := handlers.NewAlertsHandler(eventStore)
 	rulesHandler := handlers.NewRulesHandler(eventStore)
+	usersHandler := handlers.NewUserHandler(eventStore)
 	observabilityHandler := handlers.NewObservabilityHandler(eventStore, handlers.RuntimeConfigStatus{
 		GitHubTokenConfigured:         cfg.GitHubToken != "",
 		GitHubWebhookSecretConfigured: cfg.GitHubWebhookSecret != "",
@@ -63,11 +64,26 @@ func main() {
 
 	r := gin.Default()
 
+	// CORS中间件
+	r.Use(func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", "http://localhost:5173")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, Authorization")
+		c.Header("Access-Control-Allow-Credentials", "true")
+
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+
+		c.Next()
+	})
+
 	r.GET("/health", handlers.Health)
 	r.POST("/auth/login", authHandler.Login)
 	r.POST("/webhook/github", webhookHandler.GitHub)
 
-	api := r.Group("/")
+	api := r.Group("/api")
 	api.Use(handlers.AuthMiddleware(cfg.JWTSecret))
 	api.GET("/events", eventsHandler.List)
 	api.GET("/events/filter-options", eventsHandler.FilterOptions)
@@ -78,6 +94,14 @@ func main() {
 	api.GET("/rules/filter-options", rulesHandler.FilterOptions)
 	api.POST("/rules", rulesHandler.Create)
 	api.PATCH("/rules/:id/active", rulesHandler.UpdateActive)
+
+	api.GET("/users", usersHandler.List)
+	api.GET("/users/:id", usersHandler.GetByID)
+	api.POST("/users", usersHandler.Create)
+	api.PUT("/users/:id", usersHandler.Update)
+	api.PUT("/users/:id/password", usersHandler.UpdatePassword)
+	api.PATCH("/users/:id/active", usersHandler.UpdateActive)
+	api.DELETE("/users/:id", usersHandler.Delete)
 
 	api.GET("/config-status", observabilityHandler.ConfigStatus)
 	api.GET("/config-view", observabilityHandler.ConfigView)

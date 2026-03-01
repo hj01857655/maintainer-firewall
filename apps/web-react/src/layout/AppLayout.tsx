@@ -58,7 +58,7 @@ export function AppLayout({ children }: Props) {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 transition-colors duration-200">
       <div className="mx-auto grid min-h-screen max-w-[1600px] grid-cols-1 lg:grid-cols-[320px_1fr]">
-        <aside className="border-r border-slate-200/60 bg-white/90 backdrop-blur-xl px-6 py-6 shadow-xl dark:border-slate-700/50 dark:bg-gradient-to-b dark:from-slate-800 dark:to-slate-900 dark:shadow-2xl lg:sticky lg:top-0 lg:h-screen lg:border-b-0 lg:shadow-2xl transition-all duration-300">
+        <aside className="border-r border-slate-200/60 bg-white/90 backdrop-blur-xl px-6 py-6 shadow-xl dark:border-slate-800/60 dark:bg-gradient-to-b dark:from-slate-900 dark:to-black dark:shadow-2xl lg:sticky lg:top-0 lg:h-screen lg:border-b-0 lg:shadow-2xl transition-all duration-300">
           <div className="flex items-center space-x-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 text-white shadow-lg shadow-blue-500/30">
               <svg className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
@@ -75,6 +75,8 @@ export function AppLayout({ children }: Props) {
             <NavItem to="/alerts" label={t('nav.alerts')} />
             <NavItem to="/failures" label={t('nav.failures')} />
             <NavItem to="/audit" label={t('nav.audit')} />
+            <NavItem to="/users" label={t('nav.users')} />
+            <NavItem to="/analytics" label={t('nav.analytics')} />
             <NavItem to="/system-config" label={t('nav.systemConfig')} />
             <NavItem to="/guide" label={t('nav.guide')} />
           </nav>
@@ -223,7 +225,9 @@ function NavItem({ to, label }: { to: string; label: string }) {
 function LanguageIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 5h12M9 5v1a12 12 0 0 1-6 10M4 15h10M7 13c1.2 2 3.2 4.4 5 6M17 6h4m-2-2v4M14 19h8m-7-3h6" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+      <circle cx="12" cy="12" r="8" />
+      <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
     </svg>
   )
 }

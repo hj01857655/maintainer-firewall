@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiFetch } from '../api'
+import { SkeletonTable } from '../components/Skeleton'
 
 type EventItem = {
   id: number
@@ -150,6 +151,7 @@ function extractTarget(evt: EventItem): { label: string; url: string | null; sum
 export function EventsPage() {
   const { t } = useTranslation()
   const [events, setEvents] = useState<EventItem[]>([])
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [eventTypeFilter, setEventTypeFilter] = useState('')
   const [actionFilter, setActionFilter] = useState('')
@@ -162,6 +164,8 @@ export function EventsPage() {
   const limit = 20
 
   function reloadEvents(nextOffset = offset) {
+    setLoading(true)
+    setError('')
     const params = new URLSearchParams({ limit: String(limit), offset: String(nextOffset) })
     if (eventTypeFilter) params.set('event_type', eventTypeFilter)
     if (actionFilter) params.set('action', actionFilter)
@@ -170,17 +174,17 @@ export function EventsPage() {
       .then(async (r) => {
         if (!r.ok) {
           const body = await r.text()
-          throw new Error(`events HTTP ${r.status} ${body}`.trim())
+          throw new Error(`HTTP ${r.status}: ${body}`)
         }
         return r.json() as Promise<EventsResponse>
       })
-      .then((data: EventsResponse) => {
-        if (!data.ok) throw new Error(data.message || 'events response not ok')
-        setEvents(data.items)
-        setTotal(data.total)
-        setError('')
+      .then((body) => {
+        setEvents(body.items)
+        setTotal(body.total)
+        setOffset(nextOffset)
       })
       .catch((e: Error) => setError(e.message))
+      .finally(() => setLoading(false))
   }
 
   function loadSyncStatus() {
@@ -354,60 +358,65 @@ export function EventsPage() {
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white/95 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:shadow-xl">
-        <table className="min-w-[1200px] w-full text-sm">
-          <thead className="bg-slate-50 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-            <tr>
-              <th className="px-3 py-3 text-left font-semibold">{t('events.table.id')}</th>
-              <th className="px-3 py-3 text-left font-semibold">{t('events.table.type')}</th>
-              <th className="px-3 py-3 text-left font-semibold">{t('events.table.action')}</th>
-              <th className="px-3 py-3 text-left font-semibold">{t('events.table.repository')}</th>
-              <th className="px-3 py-3 text-left font-semibold">{t('events.table.target')}</th>
-              <th className="px-3 py-3 text-left font-semibold">{t('events.table.summary')}</th>
-              <th className="px-3 py-3 text-left font-semibold">{t('events.table.sender')}</th>
-              <th className="px-3 py-3 text-left font-semibold">{t('events.table.receivedAt')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {events.map((evt) => {
-              const repoUrl = toRepoUrl(evt)
-              const target = extractTarget(evt)
-              return (
-                <tr key={evt.id} className="border-t border-slate-200 hover:bg-slate-50/80 dark:border-slate-700 dark:hover:bg-slate-800/50">
-                  <td className="px-3 py-3 text-slate-900 dark:text-slate-100">{evt.id}</td>
-                  <td className="px-3 py-3 text-slate-900 dark:text-slate-100">{evt.event_type}</td>
-                  <td className="px-3 py-3 text-slate-900 dark:text-slate-100">{evt.action || '-'}</td>
-                  <td className="px-3 py-3 text-slate-900 dark:text-slate-100">
-                    {repoUrl ? (
-                      <a href={repoUrl} target="_blank" rel="noreferrer" className="cursor-pointer text-blue-600 transition-colors duration-200 hover:text-blue-700 hover:underline dark:text-blue-400 dark:hover:text-blue-300">
-                        {evt.repository_full_name}
-                      </a>
-                    ) : (
-                      evt.repository_full_name
-                    )}
-                  </td>
-                  <td className="px-3 py-3 text-slate-900 dark:text-slate-100">
-                    {target.url ? (
-                      <a href={target.url} target="_blank" rel="noreferrer" className="cursor-pointer text-blue-600 transition-colors duration-200 hover:text-blue-700 hover:underline dark:text-blue-400 dark:hover:text-blue-300">
-                        {target.label}
-                      </a>
-                    ) : (
-                      target.label
-                    )}
-                  </td>
-                  <td className="max-w-[420px] px-3 py-3 text-slate-900 dark:text-slate-100">
-                    <span className="line-clamp-2" title={target.summary}>{target.summary}</span>
-                  </td>
-                  <td className="px-3 py-3 text-slate-900">{evt.sender_login}</td>
-                  <td className="px-3 py-3 text-slate-900">{new Date(evt.received_at).toLocaleString()}</td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
+      {loading ? (
+        <SkeletonTable rows={10} cols={8} />
+      ) : (
+        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white/95 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:shadow-xl">
+          <table className="min-w-[1200px] w-full text-sm">
+            <thead className="bg-slate-50 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+              <tr>
+                <th className="px-3 py-3 text-left font-semibold">{t('events.table.id')}</th>
+                <th className="px-3 py-3 text-left font-semibold">{t('events.table.type')}</th>
+                <th className="px-3 py-3 text-left font-semibold">{t('events.table.action')}</th>
+                <th className="px-3 py-3 text-left font-semibold">{t('events.table.repository')}</th>
+                <th className="px-3 py-3 text-left font-semibold">{t('events.table.target')}</th>
+                <th className="px-3 py-3 text-left font-semibold">{t('events.table.summary')}</th>
+                <th className="px-3 py-3 text-left font-semibold">{t('events.table.sender')}</th>
+                <th className="px-3 py-3 text-left font-semibold">{t('events.table.receivedAt')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {events.map((evt) => {
+                const repoUrl = toRepoUrl(evt)
+                const target = extractTarget(evt)
+                return (
+                  <tr key={evt.id} className="border-t border-slate-200 hover:bg-slate-50/80 dark:border-slate-700 dark:hover:bg-slate-800/50">
+                    <td className="px-3 py-3 text-slate-900 dark:text-slate-100">{evt.id}</td>
+                    <td className="px-3 py-3 text-slate-900 dark:text-slate-100">{evt.event_type}</td>
+                    <td className="px-3 py-3 text-slate-900 dark:text-slate-100">{evt.action || '-'}</td>
+                    <td className="px-3 py-3 text-slate-900 dark:text-slate-100">
+                      {repoUrl ? (
+                        <a href={repoUrl} target="_blank" rel="noreferrer" className="cursor-pointer text-blue-600 transition-colors duration-200 hover:text-blue-700 hover:underline dark:text-blue-400 dark:hover:text-blue-300">
+                          {evt.repository_full_name}
+                        </a>
+                      ) : (
+                        evt.repository_full_name
+                      )}
+                    </td>
+                    <td className="px-3 py-3 text-slate-900 dark:text-slate-100">
+                      {target.url ? (
+                        <a href={target.url} target="_blank" rel="noreferrer" className="cursor-pointer text-blue-600 transition-colors duration-200 hover:text-blue-700 hover:underline dark:text-blue-400 dark:hover:text-blue-300">
+                          {target.label}
+                        </a>
+                      ) : (
+                        target.label
+                      )}
+                    </td>
+                    <td className="max-w-[420px] px-3 py-3 text-slate-900 dark:text-slate-100">
+                      <span className="line-clamp-2">{target.summary}</span>
+                    </td>
+                    <td className="px-3 py-3 text-slate-900 dark:text-slate-100">{evt.sender_login}</td>
+                    <td className="px-3 py-3 text-slate-900 dark:text-slate-100">{new Date(evt.received_at).toLocaleString()}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
-      {events.length === 0 ? <p className="text-sm text-slate-600">{t('events.empty')}</p> : null}
+      {!loading && events.length === 0 ? <p className="text-sm text-slate-600 dark:text-slate-300">{t('events.empty')}</p> : null}
+      {!loading && error ? <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300">{t('common.error', { message: error })}</p> : null}
 
       <div className="flex flex-wrap items-center gap-2">
         <button

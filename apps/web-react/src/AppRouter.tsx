@@ -10,7 +10,9 @@ import { RulesPage } from './pages/RulesPage'
 import { FailuresPage } from './pages/FailuresPage'
 import { AuditLogsPage } from './pages/AuditLogsPage'
 import { GuidePage } from './pages/GuidePage'
+import { UsersPage } from './pages/UsersPage'
 import { SystemConfigPage } from './pages/SystemConfigPage'
+import { AnalyticsPage } from './pages/AnalyticsPage'
 
 function RequireAuth({ children }: { children: ReactElement }) {
   return getAccessToken() ? children : <Navigate to="/login" replace />
@@ -35,6 +37,8 @@ export function AppRouter() {
                 <Route path="/failures" element={<FailuresPage />} />
                 <Route path="/audit" element={<AuditLogsPage />} />
                 <Route path="/system-config" element={<SystemConfigPage />} />
+                <Route path="/users" element={<UsersPage />} />
+                <Route path="/analytics" element={<AnalyticsPage />} />
               </Routes>
             </AppLayout>
           </RequireAuth>

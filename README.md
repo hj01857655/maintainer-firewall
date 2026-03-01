@@ -1,14 +1,231 @@
-# maintainer-firewall
+# 🚀 Maintainer Firewall
 
-Go + React open-source project skeleton for maintainer workflow automation.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8)](https://golang.org)
+[![React Version](https://img.shields.io/badge/React-18.3+-61DAFB)](https://reactjs.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.6+-3178C6)](https://www.typescriptlang.org)
+[![Vite](https://img.shields.io/badge/Vite-5.4+-646CFF)](https://vitejs.dev)
 
-Current status: webhook signature verification + DB event persistence (PostgreSQL/MySQL) + rule suggestion + alerts persistence + configurable rules + auto action execution + JWT-protected API/UI + action retry/failure recording + metrics/audit/config APIs + GitHub source mode (`mode=types|items`, sync + sync-status) + dynamic dropdown filters in console pages are implemented.
+**开源的维护者工作流自动化平台**
 
-## Structure
+Maintainer Firewall 是一个基于 Go + React 的开源项目，为维护者提供强大的 GitHub webhook 自动化处理能力。通过可配置的规则系统，实现智能的事件处理、自动标签添加、评论回复等功能，大幅提升开源项目维护效率。
 
-- `apps/api-go`: Go API service (Gin + PostgreSQL/MySQL event/alert store, supports auto-loading env from `.env` and auto-creating `.env` from `.env.example`)
-- `apps/web-react`: React console (Vite + TS + React Router, login/dashboard/events/rules/alerts/failures/audit/system-config pages)
-- `docs`: architecture/docs (requirements/design/handover)
+## ✨ 核心特性
+
+### 🔐 安全可靠
+- **Webhook 签名验证** - 确保请求来源可靠
+- **JWT 身份认证** - 保护 API 和管理界面
+- **环境隔离** - 支持开发/生产环境配置
+
+### 🎯 智能自动化
+- **规则引擎** - 可配置的事件匹配和自动化处理
+- **多事件支持** - Issues、PR、Comments 等 GitHub 事件
+- **批量操作** - 支持标签添加、评论回复等操作
+
+### 📊 数据洞察
+- **实时监控** - Dashboard 展示系统运行状态
+- **性能指标** - Webhook 处理延迟、成功率统计
+- **审计日志** - 完整的操作记录和追踪
+
+### 🌐 现代化界面
+- **响应式设计** - 支持桌面和移动设备
+- **深色模式** - 护眼的深色主题支持
+- **国际化** - 中英文双语界面
+- **无障碍访问** - 完整的键盘导航和屏幕阅读器支持
+
+## 🏗️ 项目架构
+
+```
+maintainer-firewall/
+├── apps/
+│   ├── api-go/          # Go API 服务 (Gin 框架)
+│   └── web-react/       # React 管理控制台 (Vite + TypeScript)
+├── docs/                # 项目文档
+├── scripts/             # 部署和测试脚本
+└── README.md           # 项目说明
+```
+
+### 技术栈
+
+| 组件 | 技术栈 | 说明 |
+|------|--------|------|
+| **后端** | Go + Gin | 高性能 HTTP 服务框架 |
+| **数据库** | PostgreSQL/MySQL | 关系型数据存储 |
+| **前端** | React + TypeScript | 现代化用户界面 |
+| **构建工具** | Vite | 快速的开发和构建工具 |
+| **样式** | Tailwind CSS | 实用优先的 CSS 框架 |
+| **状态管理** | React Query | 强大的数据获取和缓存 |
+
+## 🚀 快速开始
+
+### 环境要求
+
+- **Go** 1.21+
+- **Node.js** 18+
+- **PostgreSQL** 12+ 或 **MySQL** 8.0+
+- **Git** 2.0+
+
+### 启动后端 API
+
+```bash
+# 1. 配置环境变量
+cp .env.example .env
+# 编辑 .env 文件，设置 DATABASE_URL
+
+# 2. 安装依赖
+cd apps/api-go
+go mod tidy
+
+# 3. 启动服务
+go run ./cmd/server/main.go
+```
+
+**默认配置**：
+- 端口：8080
+- 管理员账号：`admin` / `admin123`
+- 数据库：需要手动配置
+
+### 启动前端控制台
+
+```bash
+# 1. 安装依赖
+cd apps/web-react
+npm install
+
+# 2. 启动开发服务器
+npm run dev
+```
+
+访问 `http://localhost:5173` 即可使用管理控制台。
+
+## 📚 API 接口
+
+### 认证接口
+
+```http
+POST /auth/login
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "password": "admin123"
+}
+```
+
+### Webhook 接口
+
+```http
+POST /webhook/github
+X-Hub-Signature-256: sha256=...
+Content-Type: application/json
+
+{
+  "action": "opened",
+  "issue": { ... },
+  "repository": { ... }
+}
+```
+
+### 数据接口
+
+| 接口 | 方法 | 描述 |
+|------|------|------|
+| `/health` | GET | 服务健康检查 |
+| `/events` | GET | 获取 webhook 事件列表 |
+| `/rules` | GET/POST | 规则管理 |
+| `/alerts` | GET | 获取告警列表 |
+| `/metrics/*` | GET | 系统性能指标 |
+
+## 🧪 测试和验证
+
+### 自动化测试
+
+```bash
+# 前端单元测试
+cd apps/web-react
+npm run test
+
+# 端到端测试
+cd scripts
+./e2e.ps1
+```
+
+### 手动验证
+
+```powershell
+# 登录获取 Token
+$token = Invoke-RestMethod -Method Post -Uri "http://localhost:8080/auth/login" -Body '{"username":"admin","password":"admin123"}' -ContentType "application/json"
+
+# 查看事件数据
+Invoke-RestMethod "http://localhost:8080/events?limit=5" -Headers @{Authorization="Bearer $token"}
+```
+
+## 📖 使用指南
+
+### 1. 配置 GitHub Webhook
+
+1. 在 GitHub 仓库设置中添加 webhook
+2. URL：`https://your-domain/webhook/github`
+3. Content-Type：`application/json`
+4. Secret：配置 `GITHUB_WEBHOOK_SECRET`
+
+### 2. 创建自动化规则
+
+1. 登录管理控制台
+2. 进入 "规则管理" 页面
+3. 点击 "新建规则"
+4. 配置事件类型、关键词、自动化操作
+
+### 3. 监控系统状态
+
+- **Dashboard**：查看系统概览和性能指标
+- **事件流**：监控所有 webhook 事件
+- **告警中心**：查看规则匹配结果
+- **审计日志**：追踪所有操作记录
+
+## 🤝 贡献指南
+
+欢迎贡献代码！请遵循以下步骤：
+
+1. **Fork** 本项目
+2. 创建特性分支：`git checkout -b feature/amazing-feature`
+3. 提交更改：`git commit -m 'Add amazing feature'`
+4. 推送分支：`git push origin feature/amazing-feature`
+5. 提交 **Pull Request**
+
+### 开发环境设置
+
+```bash
+# 克隆项目
+git clone https://github.com/your-username/maintainer-firewall.git
+cd maintainer-firewall
+
+# 启动后端
+cd apps/api-go
+go run ./cmd/server/main.go
+
+# 启动前端（新终端）
+cd apps/web-react
+npm install
+npm run dev
+```
+
+## 📄 许可证
+
+本项目采用 **MIT 许可证** - 查看 [LICENSE](LICENSE) 文件了解详情。
+
+## 🙏 致谢
+
+感谢所有为这个项目贡献的开发者！
+
+- **Gin** - 优秀的 Go Web 框架
+- **React** - 用户界面库
+- **Tailwind CSS** - 实用优先的样式框架
+- **Vite** - 下一代前端构建工具
+
+---
+
+**⭐ 如果这个项目对你有帮助，请给我们一个 Star！**
 
 ## Run API
 
