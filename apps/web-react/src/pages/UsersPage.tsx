@@ -66,7 +66,7 @@ export function UsersPage() {
   })
 
   // 获取用户列表
-  const { data: usersData, isLoading, error } = useQuery({
+  const { data: usersData, isLoading } = useQuery({
     queryKey: ['users'],
     queryFn: async () => {
       const response = await api.get('/api/users?limit=100')
