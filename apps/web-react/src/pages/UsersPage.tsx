@@ -163,7 +163,7 @@ export function UsersPage() {
   }
 
   const handleDeleteUser = (user: AdminUser) => {
-    if (confirm(t('users.confirmDelete', { username: user.username }))) {
+  if (confirm(t('users.confirmDelete', { username: user.username }))) {
       deleteMutation.mutate(user.id)
     }
   }
@@ -227,7 +227,7 @@ export function UsersPage() {
             {users.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={5} className="text-center py-8 text-slate-500">
-                  {t('users.noUsers')}
+                  {t('noUsers')}
                 </TableCell>
               </TableRow>
             ) : (
@@ -295,7 +295,7 @@ export function UsersPage() {
                         onClick={() => handleToggleActive(user)}
                         disabled={toggleActiveMutation.isPending}
                       >
-                        {user.is_active ? t('users.deactivate') : t('users.activate')}
+                        {user.is_active ? t('users.actions.deactivate') : t('users.actions.activate')}
                       </Button>
                       <Button
                         size="sm"

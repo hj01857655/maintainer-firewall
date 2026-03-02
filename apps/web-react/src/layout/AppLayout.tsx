@@ -225,9 +225,12 @@ function NavItem({ to, label }: { to: string; label: string }) {
 function LanguageIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
-      <circle cx="12" cy="12" r="8" />
-      <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 5h12M9 3v2m0 4v2m0 4v2m0 4v2M7 7h2m4 0h2m-6 4h2m4 0h2m-6 4h2m4 0h2m-6 4h2m4 0h2" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2m0 4v2m0 4v2m0 4v2" />
+      <circle cx="9" cy="9" r="1" />
+      <circle cx="15" cy="9" r="1" />
+      <circle cx="9" cy="15" r="1" />
+      <circle cx="15" cy="15" r="1" />
     </svg>
   )
 }
