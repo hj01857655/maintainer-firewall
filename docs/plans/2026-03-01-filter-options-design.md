@@ -10,6 +10,16 @@
 
 ---
 
+## Status Sync (2026-03-03)
+
+- Status: `Completed`
+- Actual delivery:
+  - Backend filter options endpoints are available and protected.
+  - Frontend Events/Alerts/Rules pages use backend-provided full options.
+  - Related docs have been synced in `README.md` / `docs/requirements.md` / `docs/design.md` / `docs/handover.md`.
+- Note:
+  - This plan document is kept as a historical implementation plan; route examples in old sections may still show pre-`/api` style wording.
+
 ### Task 1: Events filter options API (TDD)
 
 **Files:**

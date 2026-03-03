@@ -7,11 +7,13 @@ on:
     paths:
       - apps/api-go/**
       - apps/web-react/**
+      - scripts/**
       - .github/workflows/ci.yml
   pull_request:
     paths:
       - apps/api-go/**
       - apps/web-react/**
+      - scripts/**
       - .github/workflows/ci.yml
 
 jobs:
@@ -32,6 +34,7 @@ jobs:
           filters: |
             api_go:
               - 'apps/api-go/**'
+              - 'scripts/**'
               - '.github/workflows/ci.yml'
             web_react:
               - 'apps/web-react/**'
@@ -64,6 +67,74 @@ jobs:
 
       - name: Build
         run: go build ./...
+
+  api-rules-version-smoke:
+    name: API Rules Version Smoke
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.api_go == 'true'
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: maintainer_firewall
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d maintainer_firewall"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+
+    defaults:
+      run:
+        working-directory: apps/api-go
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/api-go/go.mod
+          cache-dependency-path: apps/api-go/go.sum
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run rules version smoke
+        shell: bash
+        env:
+          PORT: "8080"
+          DATABASE_URL: "postgres://postgres:postgres@localhost:5432/maintainer_firewall?sslmode=disable"
+          ADMIN_USERNAME: "admin"
+          ADMIN_PASSWORD: "admin123"
+          JWT_SECRET: "ci-jwt-secret"
+          GITHUB_WEBHOOK_SECRET: "ci-webhook-secret"
+          AUTH_ENV_FALLBACK: "true"
+          BOOTSTRAP_ADMIN_ON_START: "true"
+        run: |
+          set -euo pipefail
+          go run ./cmd/server/main.go > /tmp/mf-api.log 2>&1 &
+          API_PID=$!
+          trap "kill ${API_PID} >/dev/null 2>&1 || true; echo '--- api log ---'; tail -n 120 /tmp/mf-api.log || true" EXIT
+
+          for i in $(seq 1 40); do
+            if curl -fsS "http://localhost:8080/health" >/dev/null; then
+              break
+            fi
+            sleep 0.5
+            if [ "$i" -eq 40 ]; then
+              echo "API did not become healthy in time"
+              exit 1
+            fi
+          done
+
+          cd "${GITHUB_WORKSPACE}"
+          pwsh -NoProfile -File scripts/rules-version-flow.ps1 -AdminUsername "admin" -AdminPassword "admin123" -TenantID "default" -ApiPort 8080
 
   web-react:
     name: Web React Build

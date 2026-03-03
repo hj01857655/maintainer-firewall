@@ -576,7 +576,7 @@ func (s *MySQLWebhookEventStore) ListActionExecutionFailures(ctx context.Context
 	tenantID := tenantIDFromCtxMySQL(ctx)
 	var total int64
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM webhook_action_failures WHERE tenant_id = ? AND (? OR is_resolved = FALSE)`, tenantID, includeResolved).Scan(&total); err != nil {
-
+		return nil, 0, fmt.Errorf("count action failures: %w", err)
 	}
 
 	rows, err := s.db.QueryContext(ctx, `

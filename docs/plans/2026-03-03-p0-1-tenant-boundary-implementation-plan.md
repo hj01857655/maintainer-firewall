@@ -10,6 +10,20 @@
 
 ---
 
+## 状态同步（2026-03-03）
+
+- 当前状态：`Completed (P0-1)`  
+- 已落地范围：
+  1. `tenantctx` 上下文工具与测试。
+  2. 登录与 JWT claim 支持 `tenant_id`，中间件透传到 request context。
+  3. PostgreSQL/MySQL schema 租户化（含 `tenants`、`tenant_id`、复合唯一约束）。
+  4. Store 读写按租户隔离（事件/告警/规则/失败记录/审计/用户等核心路径）。
+  5. 租户管理 API：`GET /api/tenants`、`POST /api/tenants`、`PATCH /api/tenants/:id/active`。
+  6. 前端登录最小租户接入（tenant 输入与持久化）。
+- 补充说明：
+  - 本计划的若干命令示例仍是执行时草案；当前真实接口分层以 `/api/*` + RBAC 为准。
+  - 后续 P0-2（权限治理）与 P0-3（规则生命周期）已在独立实现中继续推进并已落地主要能力。
+
 ### Task 1: 租户上下文基础设施（后端）
 
 **Files:**

@@ -761,7 +761,7 @@ func (s *WebhookEventStore) ListActionExecutionFailures(ctx context.Context, lim
 	tenantID := tenantIDFromCtx(ctx)
 	var total int64
 	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM webhook_action_failures WHERE tenant_id = $1 AND ($2 OR is_resolved = FALSE)`, tenantID, includeResolved).Scan(&total); err != nil {
-
+		return nil, 0, fmt.Errorf("count action failures: %w", err)
 	}
 
 	rows, err := s.pool.Query(ctx, `
@@ -786,7 +786,7 @@ func (s *WebhookEventStore) ListActionExecutionFailures(ctx context.Context, lim
 		if rec.LastRetryAt.Equal(time.Unix(0, 0).UTC()) {
 			rec.LastRetryAt = time.Time{}
 		}
-
+		items = append(items, rec)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, 0, fmt.Errorf("iterate action failures: %w", err)
@@ -1167,7 +1167,7 @@ func (s *WebhookEventStore) GetMetricsOverview(ctx context.Context, since time.T
 		return out, fmt.Errorf("count alerts metrics: %w", err)
 	}
 	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM webhook_action_failures WHERE tenant_id = $1 AND occurred_at >= $2 AND is_resolved = FALSE`, tenantID, since).Scan(&out.Failures24h); err != nil {
-
+		return out, fmt.Errorf("count failures metrics: %w", err)
 	}
 
 	var total int64

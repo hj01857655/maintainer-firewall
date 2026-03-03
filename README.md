@@ -362,6 +362,12 @@ Script does:
 #   -DatabaseURL "mysql://<MYSQL_USER>:<MYSQL_PASSWORD>@127.0.0.1:3306/maintainer_firewall"
 ```
 
+If your local PowerShell blocks script execution, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\e2e.ps1 <args...>
+```
+
 What it verifies automatically:
 
 - health endpoint is up
@@ -381,6 +387,12 @@ What it verifies automatically:
   -AdminPassword "<YOUR_ADMIN_PASSWORD>" `
   -TenantID "default" `
   -ApiPort 8080
+```
+
+Execution policy fallback:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\rules-version-flow.ps1 <args...>
 ```
 
 What it verifies automatically:
