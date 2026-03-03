@@ -108,7 +108,8 @@ Content-Type: application/json
 
 {
   "username": "admin",
-  "password": "admin123"
+  "password": "admin123",
+  "tenant_id": "default"
 }
 ```
 
@@ -157,7 +158,7 @@ cd scripts
 $token = Invoke-RestMethod -Method Post -Uri "http://localhost:8080/auth/login" -Body '{"username":"admin","password":"admin123"}' -ContentType "application/json"
 
 # 查看事件数据
-Invoke-RestMethod "http://localhost:8080/events?limit=5" -Headers @{Authorization="Bearer $token"}
+Invoke-RestMethod "http://localhost:8080/api/events?limit=5" -Headers @{Authorization="Bearer $token"}
 ```
 
 ## 📖 使用指南
@@ -262,37 +263,47 @@ Local defaults when omitted (development only):
 
 API endpoints:
 
-- `GET http://localhost:8080/health`
-- `POST http://localhost:8080/auth/login` (default local account in development: `admin` / `admin123`)
-- `POST http://localhost:8080/webhook/github`
-- `GET http://localhost:8080/events?limit=20&offset=0&event_type=issues&action=opened` (auth required)
-  - response includes `total` for pagination
-- `GET http://localhost:8080/events/filter-options` (auth required)
-  - return full-dataset filter options: `event_types/actions/repositories/senders`
-- `GET http://localhost:8080/events?source=github` (auth required)
-  - default `mode=types`, return unique `event_types`
-- `GET http://localhost:8080/events?source=github&mode=items&limit=20&offset=0` (auth required)
-  - return paginated recent GitHub event items
-- `GET http://localhost:8080/events?source=github&sync=true` (auth required)
-  - pull current GitHub user recent events and sync into `webhook_events`
-- `GET http://localhost:8080/events/sync-status` (auth required)
-  - return GitHub sync runtime status and last sync counters
-- `GET http://localhost:8080/alerts?limit=20&offset=0&event_type=issues&action=opened&suggestion_type=label` (auth required)
-  - response includes `total` for pagination
-- `GET http://localhost:8080/alerts/filter-options` (auth required)
-  - return full-dataset filter options: `event_types/actions/suggestion_types/repositories/senders`
-- `GET/POST http://localhost:8080/rules` (auth required)
-- `GET http://localhost:8080/rules/filter-options` (auth required)
-  - return full-dataset filter options: `event_types/suggestion_types/active_states`
-- `PATCH http://localhost:8080/rules/:id/active` (auth required)
-- `GET http://localhost:8080/action-failures` (auth required)
-- `POST http://localhost:8080/action-failures/:id/retry` (auth required)
-- `GET http://localhost:8080/audit-logs` (auth required)
-- `GET http://localhost:8080/metrics/overview` (auth required)
-- `GET http://localhost:8080/metrics/timeseries` (auth required)
-- `GET http://localhost:8080/config-status` (auth required)
-- `GET http://localhost:8080/config-view` (auth required)
-- `POST http://localhost:8080/config-update` (auth required)
+- Public:
+  - `GET http://localhost:8080/health`
+  - `POST http://localhost:8080/auth/login` (body supports `tenant_id`, default `default`)
+  - `POST http://localhost:8080/webhook/github`
+- Protected (`Authorization: Bearer <jwt>`, all under `/api/*`):
+  - Read permission:
+    - `GET http://localhost:8080/api/events`
+    - `GET http://localhost:8080/api/events/filter-options`
+    - `GET http://localhost:8080/api/events/sync-status`
+    - `GET http://localhost:8080/api/alerts`
+    - `GET http://localhost:8080/api/alerts/filter-options`
+    - `GET http://localhost:8080/api/rules`
+    - `GET http://localhost:8080/api/rules/filter-options`
+    - `GET http://localhost:8080/api/rules/versions`
+    - `POST http://localhost:8080/api/rules/replay`
+    - `GET http://localhost:8080/api/users`
+    - `GET http://localhost:8080/api/users/:id`
+    - `GET http://localhost:8080/api/tenants`
+    - `GET http://localhost:8080/api/action-failures`
+    - `GET http://localhost:8080/api/audit-logs`
+    - `GET http://localhost:8080/api/metrics/overview`
+    - `GET http://localhost:8080/api/metrics/timeseries`
+    - `GET http://localhost:8080/api/config-status`
+    - `GET http://localhost:8080/api/config-view`
+  - Write permission:
+    - `POST http://localhost:8080/api/rules`
+    - `PATCH http://localhost:8080/api/rules/:id/active`
+    - `POST http://localhost:8080/api/rules/publish`
+    - `POST http://localhost:8080/api/users`
+    - `PUT http://localhost:8080/api/users/:id`
+    - `PUT http://localhost:8080/api/users/:id/password`
+    - `PATCH http://localhost:8080/api/users/:id/active`
+    - `POST http://localhost:8080/api/action-failures/:id/retry`
+  - Admin permission:
+    - `POST http://localhost:8080/api/tenants`
+  - Admin + danger confirm (`X-MF-Confirm: confirm`):
+    - `DELETE http://localhost:8080/api/users/:id`
+    - `PATCH http://localhost:8080/api/tenants/:id/active`
+    - `POST http://localhost:8080/api/config-update`
+    - `POST http://localhost:8080/api/rules/rollback`
+
 
 ## Run Web
 
@@ -305,7 +316,7 @@ npm run dev
 Web app:
 
 - `http://localhost:5173`
-- automatically proxies `/health` / `/auth` / `/events` / `/alerts` / `/rules` / `/action-failures` / `/audit-logs` / `/metrics` / `/config-*` to `http://localhost:8080`
+- automatically proxies `/api/*` to `http://localhost:8080`
 
 ## Docs
 
@@ -336,6 +347,7 @@ Script does:
 .\scripts\e2e.ps1 `
   -AdminUsername "admin" `
   -AdminPassword "<YOUR_ADMIN_PASSWORD>" `
+  -TenantID "default" `
   -JWTSecret "<YOUR_JWT_SECRET>" `
   -GitHubWebhookSecret "<YOUR_WEBHOOK_SECRET>" `
   -DatabaseURL "postgres://postgres:postgres@localhost:5432/maintainer_firewall?sslmode=disable"
@@ -344,6 +356,7 @@ Script does:
 # .\scripts\e2e.ps1 `
 #   -AdminUsername "admin" `
 #   -AdminPassword "<YOUR_ADMIN_PASSWORD>" `
+#   -TenantID "default" `
 #   -JWTSecret "<YOUR_JWT_SECRET>" `
 #   -GitHubWebhookSecret "<YOUR_WEBHOOK_SECRET>" `
 #   -DatabaseURL "mysql://<MYSQL_USER>:<MYSQL_PASSWORD>@127.0.0.1:3306/maintainer_firewall"
@@ -359,6 +372,26 @@ What it verifies automatically:
 - works with either PostgreSQL or MySQL via `-DatabaseURL`
 - webhook payload now requires real test target parameters (`-GitHubTestRepo`, `-GitHubTestIssueNumber`) to avoid placeholder dirty data
 
+## Rules Version Flow (automated)
+
+```powershell
+# API already running at localhost:8080
+.\scripts\rules-version-flow.ps1 `
+  -AdminUsername "admin" `
+  -AdminPassword "<YOUR_ADMIN_PASSWORD>" `
+  -TenantID "default" `
+  -ApiPort 8080
+```
+
+What it verifies automatically:
+
+- login with tenant context
+- create rules + publish snapshots
+- list rule versions
+- replay by historical version
+- rollback with `X-MF-Confirm: confirm`
+- replay current active rules (`version=0`)
+
 ## Quick API check (manual)
 
 ```powershell
@@ -368,18 +401,18 @@ $login = Invoke-RestMethod -Method Post -Uri http://localhost:8080/auth/login -C
 $headers = @{ Authorization = "Bearer $($login.token)" }
 
 # list events (auth required)
-Invoke-RestMethod "http://localhost:8080/events?limit=20&offset=0&event_type=issues&action=opened" -Headers $headers
+Invoke-RestMethod "http://localhost:8080/api/events?limit=20&offset=0&event_type=issues&action=opened" -Headers $headers
 
 # list alerts (auth required)
-Invoke-RestMethod "http://localhost:8080/alerts?limit=20&offset=0&event_type=issues&action=opened&suggestion_type=label" -Headers $headers
+Invoke-RestMethod "http://localhost:8080/api/alerts?limit=20&offset=0&event_type=issues&action=opened&suggestion_type=label" -Headers $headers
 
 # list failures and retry one item
-Invoke-RestMethod "http://localhost:8080/action-failures?limit=20&offset=0&include_resolved=true" -Headers $headers
-# Invoke-RestMethod -Method Post "http://localhost:8080/action-failures/<ID>/retry" -Headers $headers
+Invoke-RestMethod "http://localhost:8080/api/action-failures?limit=20&offset=0&include_resolved=true" -Headers $headers
+# Invoke-RestMethod -Method Post "http://localhost:8080/api/action-failures/<ID>/retry" -Headers $headers
 
 # metrics and audit
-Invoke-RestMethod "http://localhost:8080/metrics/overview?window=24h" -Headers $headers
-Invoke-RestMethod "http://localhost:8080/audit-logs?limit=20&offset=0" -Headers $headers
+Invoke-RestMethod "http://localhost:8080/api/metrics/overview?window=24h" -Headers $headers
+Invoke-RestMethod "http://localhost:8080/api/audit-logs?limit=20&offset=0" -Headers $headers
 ```
 
 ## CI
@@ -402,6 +435,9 @@ Invoke-RestMethod "http://localhost:8080/audit-logs?limit=20&offset=0" -Headers 
 - Full-dataset filter-options APIs for Events/Rules/Alerts
 - Failures/audit/metrics/config APIs
 - Console pages: events/rules/alerts/failures/audit/system-config
+- Multi-tenant context propagation (`tenant_id`) across auth, middleware, and store queries
+- RBAC permission layers (`read` / `write` / `admin`) + danger confirmation header for destructive APIs
+- Rule version lifecycle APIs (`/api/rules/publish` `/api/rules/versions` `/api/rules/rollback` `/api/rules/replay`)
 - CI checks for API/Web build
 
 ## Secondary (next)

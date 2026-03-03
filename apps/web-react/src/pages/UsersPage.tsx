@@ -134,7 +134,11 @@ export function UsersPage() {
   // 删除用户
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
-      const response = await api.delete(`/api/users/${id}`)
+      const response = await api.delete(`/api/users/${id}`, {
+        headers: {
+          'X-MF-Confirm': 'confirm',
+        },
+      })
       return response
     },
     onSuccess: () => {

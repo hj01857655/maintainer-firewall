@@ -1,6 +1,7 @@
 param(
   [string]$AdminUsername = "admin",
   [string]$AdminPassword = "CHANGE_ME_ADMIN_PASSWORD",
+  [string]$TenantID = "default",
   [string]$AccessToken = "CHANGE_ME_LEGACY_ACCESS_TOKEN",
   [string]$GitHubWebhookSecret = "CHANGE_ME_WEBHOOK_SECRET",
   [string]$GitHubToken = "",
@@ -52,6 +53,7 @@ if ($AdminPassword -like 'CHANGE_ME*' -or $GitHubWebhookSecret -like 'CHANGE_ME*
 $loginResp = Invoke-RestMethod -Method Post -Uri "http://localhost:$ApiPort/auth/login" -ContentType "application/json" -Body (@{
   username = $AdminUsername
   password = $AdminPassword
+  tenant_id = $TenantID
 } | ConvertTo-Json)
 if (-not $loginResp.ok -or -not $loginResp.token) {
   throw "Login failed: $($loginResp | ConvertTo-Json -Compress)"
@@ -68,7 +70,7 @@ $ruleBody = @{
   reason = "demo urgent rule"
   is_active = $true
 } | ConvertTo-Json
-$null = Invoke-RestMethod -Method Post -Uri "http://localhost:$ApiPort/rules" -Headers $authHeaders -ContentType "application/json" -Body $ruleBody
+$null = Invoke-RestMethod -Method Post -Uri "http://localhost:$ApiPort/api/rules" -Headers $authHeaders -ContentType "application/json" -Body $ruleBody
 
 Write-Host "[6/7] Send demo webhook..." -ForegroundColor Cyan
 $deliveryId = "demo-" + [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
@@ -97,8 +99,8 @@ $webhookResp = Invoke-RestMethod -Method Post -Uri "http://localhost:$ApiPort/we
 } -Body $body -ContentType "application/json"
 
 Write-Host "[7/7] Query events and alerts..." -ForegroundColor Cyan
-$events = Invoke-RestMethod -Method Get -Uri "http://localhost:$ApiPort/events?limit=5&offset=0&event_type=issues&action=opened" -Headers $authHeaders
-$alerts = Invoke-RestMethod -Method Get -Uri "http://localhost:$ApiPort/alerts?limit=5&offset=0&event_type=issues&action=opened&suggestion_type=label" -Headers $authHeaders
+$events = Invoke-RestMethod -Method Get -Uri "http://localhost:$ApiPort/api/events?limit=5&offset=0&event_type=issues&action=opened" -Headers $authHeaders
+$alerts = Invoke-RestMethod -Method Get -Uri "http://localhost:$ApiPort/api/alerts?limit=5&offset=0&event_type=issues&action=opened&suggestion_type=label" -Headers $authHeaders
 
 Write-Host "\n=== Demo Summary ===" -ForegroundColor Green
 Write-Host ("API Health : {0}" -f $apiHealthUrl)

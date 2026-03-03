@@ -11,8 +11,10 @@ import (
 	"time"
 
 	"maintainer-firewall/api-go/internal/store"
+	"maintainer-firewall/api-go/internal/tenantctx"
 
 	"github.com/gin-gonic/gin"
+	jwt "github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -47,7 +49,7 @@ func TestAuthLogin_Success(t *testing.T) {
 	r := gin.New()
 	r.POST("/auth/login", h.Login)
 
-	req := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"username":"admin","password":"pass123"}`))
+	req := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"username":"admin","password":"pass123","tenant_id":"team-a"}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -61,6 +63,27 @@ func TestAuthLogin_Success(t *testing.T) {
 	token, _ := body["token"].(string)
 	if strings.TrimSpace(token) == "" {
 		t.Fatalf("expected non-empty jwt token, got %s", w.Body.String())
+	}
+
+	parsed, err := jwt.Parse(token, func(token *jwt.Token) (any, error) {
+		return []byte("jwt-secret"), nil
+	})
+	if err != nil || parsed == nil || !parsed.Valid {
+		t.Fatalf("expected valid jwt token, err=%v", err)
+	}
+	claims, ok := parsed.Claims.(jwt.MapClaims)
+	if !ok {
+		t.Fatalf("expected map claims")
+	}
+	if claims["tenant_id"] != "team-a" {
+		t.Fatalf("expected tenant_id=team-a, got %#v", claims["tenant_id"])
+	}
+	if claims["role"] != "admin" {
+		t.Fatalf("expected role=admin, got %#v", claims["role"])
+	}
+	perms, ok := claims["permissions"].([]any)
+	if !ok || len(perms) != 3 {
+		t.Fatalf("expected permissions length=3, got %#v", claims["permissions"])
 	}
 }
 
@@ -87,7 +110,7 @@ func TestAuthLogin_UsesDatabaseUserWhenAvailable(t *testing.T) {
 		t.Fatalf("generate hash: %v", err)
 	}
 
-	mockStore := &mockAuthStore{userToReturn: &store.AdminUser{ID: 7, Username: "admin", PasswordHash: string(hash), IsActive: true}}
+	mockStore := &mockAuthStore{userToReturn: &store.AdminUser{ID: 7, Username: "admin", PasswordHash: string(hash), IsActive: true, Role: "admin", Permissions: []string{"read", "write", "admin"}}}
 	h := NewAuthHandlerWithStore(mockStore, "admin", "env-pass", "jwt-secret", time.Hour, true)
 	r := gin.New()
 	r.POST("/auth/login", h.Login)
@@ -225,14 +248,24 @@ func TestAuthMiddleware_RequiresToken(t *testing.T) {
 
 func TestAuthMiddleware_Success(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	token, err := issueJWT("admin", "jwt-secret", time.Hour)
+	token, err := issueJWT("admin", "team-a", "editor", []string{"read", "write"}, "jwt-secret", time.Hour)
 	if err != nil {
 		t.Fatalf("issue jwt: %v", err)
 	}
 
 	r := gin.New()
 	r.Use(AuthMiddleware("jwt-secret"))
-	r.GET("/protected", func(c *gin.Context) { c.JSON(200, gin.H{"ok": true}) })
+	r.GET("/protected", func(c *gin.Context) {
+		ctxTenantID, ok := tenantctx.FromContext(c.Request.Context())
+		c.JSON(200, gin.H{
+			"ok":            true,
+			"tenant_id":     c.GetString("tenant_id"),
+			"role":          c.GetString("role"),
+			"permissions":   c.GetStringSlice("permissions"),
+			"ctx_ok":        ok,
+			"ctx_tenant_id": ctxTenantID,
+		})
+	})
 
 	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -242,11 +275,27 @@ func TestAuthMiddleware_Success(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
+
+	var body map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if body["tenant_id"] != "team-a" {
+		t.Fatalf("expected middleware tenant_id=team-a, got %#v", body["tenant_id"])
+	}
+	if body["role"] != "editor" {
+		t.Fatalf("expected middleware role=editor, got %#v", body["role"])
+	}
+	if body["ctx_ok"] != true || body["ctx_tenant_id"] != "team-a" {
+		t.Fatalf("expected request context tenant_id=team-a, got body=%s", w.Body.String())
+	}
+	perms, ok := body["permissions"].([]any)
+	if !ok || len(perms) != 2 {
+		t.Fatalf("expected middleware permissions [read write], got %#v", body["permissions"])
+	}
 }
 
 func TestAuthMiddleware_ExpiredToken(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	token, err := issueJWT("admin", "jwt-secret", -1*time.Minute)
+	token, err := issueJWT("admin", "team-a", "admin", []string{"read", "write", "admin"}, "jwt-secret", -1*time.Minute)
 	if err != nil {
 		t.Fatalf("issue jwt: %v", err)
 	}
@@ -262,5 +311,56 @@ func TestAuthMiddleware_ExpiredToken(t *testing.T) {
 
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for expired token, got %d", w.Code)
+	}
+}
+
+func TestAuthMiddleware_LegacyTokenWithoutTenantClaimFallback(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	legacyClaims := jwt.MapClaims{
+		"sub": "admin",
+		"iat": time.Now().UTC().Unix(),
+		"exp": time.Now().UTC().Add(time.Hour).Unix(),
+	}
+	legacyToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, legacyClaims).SignedString([]byte("jwt-secret"))
+	if err != nil {
+		t.Fatalf("issue legacy token: %v", err)
+	}
+
+	r := gin.New()
+	r.Use(AuthMiddleware("jwt-secret"))
+	r.GET("/protected", func(c *gin.Context) {
+		ctxTenantID, ok := tenantctx.FromContext(c.Request.Context())
+		c.JSON(200, gin.H{
+			"tenant_id":     c.GetString("tenant_id"),
+			"role":          c.GetString("role"),
+			"permissions":   c.GetStringSlice("permissions"),
+			"ctx_ok":        ok,
+			"ctx_tenant_id": ctxTenantID,
+		})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	req.Header.Set("Authorization", "Bearer "+legacyToken)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	var body map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if body["tenant_id"] != tenantctx.DefaultTenantID {
+		t.Fatalf("expected default tenant fallback, got %#v", body["tenant_id"])
+	}
+	if body["role"] != "admin" {
+		t.Fatalf("expected legacy token role fallback admin, got %#v", body["role"])
+	}
+	if body["ctx_ok"] != true || body["ctx_tenant_id"] != tenantctx.DefaultTenantID {
+		t.Fatalf("expected context default tenant fallback, got body=%s", w.Body.String())
+	}
+	perms, ok := body["permissions"].([]any)
+	if !ok || len(perms) != 3 {
+		t.Fatalf("expected legacy token permissions fallback, got %#v", body["permissions"])
 	}
 }

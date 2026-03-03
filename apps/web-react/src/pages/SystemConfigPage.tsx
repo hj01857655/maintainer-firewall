@@ -62,6 +62,9 @@ export function SystemConfigPage() {
 
   async function onSave(e: React.FormEvent) {
     e.preventDefault()
+    if (!window.confirm('此操作将更新系统配置并可能影响运行，确认继续？')) {
+      return
+    }
     setSaving(true)
     setError('')
     setMessage('')
@@ -76,7 +79,10 @@ export function SystemConfigPage() {
       }
       const resp = await apiFetch('/api/config-update', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-MF-Confirm': 'confirm',
+        },
         body: JSON.stringify(payload),
       })
       if (!resp.ok) throw new Error(await resp.text())

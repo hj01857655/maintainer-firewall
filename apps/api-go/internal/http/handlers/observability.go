@@ -342,6 +342,10 @@ func maskSecret(v string) string {
 func parseWindowStart(v string) (time.Time, error) {
 	now := time.Now().UTC()
 	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "30d":
+		return now.Add(-30 * 24 * time.Hour), nil
+	case "7d":
+		return now.Add(-7 * 24 * time.Hour), nil
 	case "24h", "1d", "day":
 		return now.Add(-24 * time.Hour), nil
 	case "12h":
@@ -349,6 +353,6 @@ func parseWindowStart(v string) (time.Time, error) {
 	case "6h":
 		return now.Add(-6 * time.Hour), nil
 	default:
-		return time.Time{}, fmt.Errorf("window must be one of: 6h, 12h, 24h")
+		return time.Time{}, fmt.Errorf("window must be one of: 6h, 12h, 24h, 7d, 30d")
 	}
 }

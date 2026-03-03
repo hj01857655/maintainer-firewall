@@ -1,13 +1,14 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
-import { setAccessToken } from '../auth'
+import { setAccessToken, setTenantId } from '../auth'
 
 export function LoginPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [tenantId, setTenantIdInput] = useState('default')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -20,7 +21,7 @@ export function LoginPage() {
       const resp = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username, password, tenant_id: tenantId }),
       })
       if (!resp.ok) {
         const body = await resp.text()
@@ -31,6 +32,7 @@ export function LoginPage() {
       if (!data.ok || !data.token) throw new Error(data.message || t('login.failed', { message: 'unknown' }))
 
       setAccessToken(data.token)
+      setTenantId(tenantId)
       navigate('/dashboard', { replace: true })
     } catch (err) {
       const msg = err instanceof Error ? err.message : t('login.failed', { message: 'unknown' })
@@ -50,6 +52,18 @@ export function LoginPage() {
         <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300">{t('login.subtitle')}</p>
 
         <div className="mt-6 space-y-4">
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+            <span>Tenant ID</span>
+            <input
+              className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3 text-base text-slate-900 outline-none transition-colors duration-200 placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-blue-400 dark:focus:ring-blue-400/20"
+              value={tenantId}
+              onChange={(e) => setTenantIdInput(e.target.value)}
+              autoComplete="organization"
+              placeholder="default"
+              required
+            />
+          </label>
+
           <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
             <span>{t('login.username')}</span>
             <input

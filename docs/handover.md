@@ -10,7 +10,7 @@
 
 - Backend: Go + Gin + PostgreSQL (pgx)
 - Frontend: React + TypeScript + Vite + React Router
-- Auth: JWT bearer auth for protected APIs/UI
+- Auth: JWT bearer auth + RBAC (`read/write/admin`) + danger confirmation gate
 - Package manager: npm
 - Runtime targets: local dev first, Docker later
 
@@ -22,32 +22,43 @@
    - `infra/docker`
    - `docs`
 2. Core backend APIs
-   - `GET /health`
-   - `POST /webhook/github` (HMAC signature verification)
-   - `GET /events` (protected, pagination/filter/total)
-   - `GET /events/filter-options` (protected)
-   - `GET /alerts` (protected, pagination/filter/total)
-   - `GET /alerts/filter-options` (protected)
-   - `GET /rules`, `POST /rules` (protected)
-   - `GET /rules/filter-options` (protected)
-   - `POST /auth/login` (JWT issue)
+    - `GET /health`
+    - `POST /webhook/github` (HMAC signature verification)
+    - `POST /auth/login` (JWT issue; supports `tenant_id`)
+    - protected APIs moved under `/api/*`:
+      - read: events/alerts/rules/users/tenants/metrics/audit/config/action-failures queries
+      - write: rules create/update/publish, user mutate, failure retry
+      - admin: tenant create
+      - admin+danger confirm (`X-MF-Confirm: confirm`): user delete, tenant active toggle, config update, rule rollback
+    - rule version lifecycle:
+      - `POST /api/rules/publish`
+      - `GET /api/rules/versions`
+      - `POST /api/rules/rollback`
+      - `POST /api/rules/replay`
 3. Data persistence
-   - `webhook_events`
-   - `webhook_alerts`
-   - `webhook_rules`
+    - `webhook_events`
+    - `webhook_alerts`
+    - `webhook_rules`
+    - `webhook_rule_versions`
+    - `admin_users` (role/permissions + tenant scope)
+    - `tenants`
 4. Rule engine + automation
-   - DB-backed rule matching
-   - Suggested actions (`label` / `comment`)
-   - optional GitHub auto action execution via `GITHUB_TOKEN`
-5. Frontend pages
+    - DB-backed rule matching
+    - Suggested actions (`label` / `comment`)
+    - optional GitHub auto action execution via `GITHUB_TOKEN`
+5. Tenant + permission governance
+   - request context carries `tenant_id`
+   - JWT claims include `tenant_id` / `role` / `permissions`
+   - storage read/write paths enforce tenant isolation by `tenant_id`
+6. Frontend pages
    - login/dashboard/events/rules/alerts/failures/audit/system-config
    - Events/Alerts/Rules dropdown filters use full-dataset filter-options APIs
    - protected route guard using bearer token
-6. Reliability hardening
+7. Reliability hardening
    - action execution retry
    - failure persistence (`webhook_action_failures`)
    - webhook core persistence path remains non-blocking for action failures
-7. CI and docs
+8. CI and docs
    - GitHub Actions for Go/Web build
    - README + requirements + design aligned to current flow
 
@@ -147,8 +158,9 @@ Web app:
 2. Run `go test ./...` in `apps/api-go`
 3. Run `npm run build` in `apps/web-react`
 4. Run one-command demo from repo root: `./scripts/demo.ps1`
-5. Verify login + protected `/events` / `/events/filter-options` / `/rules` / `/rules/filter-options` / `/alerts` / `/alerts/filter-options`
-6. Verify retry/failure record behavior for action execution path
+5. Verify login + protected `/api/events` / `/api/events/filter-options` / `/api/rules` / `/api/rules/filter-options` / `/api/alerts` / `/api/alerts/filter-options`
+6. Verify rule version flow: publish -> versions list -> rollback (with `X-MF-Confirm: confirm`) -> replay
+7. Verify retry/failure record behavior for action execution path
 
 ## Notes
 

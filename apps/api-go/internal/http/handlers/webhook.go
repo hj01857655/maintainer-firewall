@@ -13,6 +13,7 @@ import (
 
 	"maintainer-firewall/api-go/internal/service"
 	"maintainer-firewall/api-go/internal/store"
+	"maintainer-firewall/api-go/internal/tenantctx"
 
 	"github.com/gin-gonic/gin"
 )
@@ -55,6 +56,7 @@ func NewWebhookHandler(secret string, eventStore WebhookEventSaver) *WebhookHand
 func (h *WebhookHandler) GitHub(c *gin.Context) {
 	startedAt := time.Now().UTC()
 	deliverySuccess := false
+	tenantID := tenantctx.MustFromContext(nil, c.GetHeader("X-MF-Tenant-ID"))
 
 	defer func() {
 		if h.Store == nil {
@@ -62,6 +64,7 @@ func (h *WebhookHandler) GitHub(c *gin.Context) {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
+		ctx = tenantctx.WithTenantID(ctx, tenantID)
 		deliveryID := c.GetHeader("X-GitHub-Delivery")
 		if strings.TrimSpace(deliveryID) == "" {
 			deliveryID = fmt.Sprintf("missing-%d", startedAt.UnixNano())
@@ -130,7 +133,8 @@ func (h *WebhookHandler) GitHub(c *gin.Context) {
 		PayloadJSON:        body,
 	}
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+	baseCtx := tenantctx.WithTenantID(c.Request.Context(), tenantID)
+	ctx, cancel := context.WithTimeout(baseCtx, 3*time.Second)
 	defer cancel()
 
 	if err := h.Store.SaveEvent(ctx, evt); err != nil {

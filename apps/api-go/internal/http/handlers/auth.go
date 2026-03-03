@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"maintainer-firewall/api-go/internal/store"
+	"maintainer-firewall/api-go/internal/tenantctx"
 
 	"github.com/gin-gonic/gin"
 	jwt "github.com/golang-jwt/jwt/v5"
@@ -28,19 +29,22 @@ type AuthHandler struct {
 	TokenTTL         time.Duration
 	AllowEnvFallback bool
 
-	RateLimitWindow    time.Duration
-	MaxFailedAttempts  int
-	LockoutDuration    time.Duration
-	mu                 sync.Mutex
-	failedAttempts     map[string]int
-	firstFailedAt      map[string]time.Time
-	lockedUntil        map[string]time.Time
+	RateLimitWindow   time.Duration
+	MaxFailedAttempts int
+	LockoutDuration   time.Duration
+	mu                sync.Mutex
+	failedAttempts    map[string]int
+	firstFailedAt     map[string]time.Time
+	lockedUntil       map[string]time.Time
 }
 
 type loginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+	TenantID string `json:"tenant_id"`
 }
+
+var supportedPermissions = []string{"read", "write", "admin"}
 
 func NewAuthHandler(adminUsername string, adminPassword string, jwtSecret string, tokenTTL time.Duration) *AuthHandler {
 	return NewAuthHandlerWithStore(nil, adminUsername, adminPassword, jwtSecret, tokenTTL, true)
@@ -80,6 +84,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	username := strings.TrimSpace(req.Username)
 	password := strings.TrimSpace(req.Password)
+	tenantID := tenantctx.MustFromContext(nil, req.TenantID)
 	if username == "" || password == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"ok": false, "message": "invalid username or password"})
 		return
@@ -91,7 +96,8 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 
 	if h.Store != nil {
-		adminUser, err := h.Store.GetAdminUserByUsername(c.Request.Context(), username)
+		storeCtx := tenantctx.WithTenantID(c.Request.Context(), tenantID)
+		adminUser, err := h.Store.GetAdminUserByUsername(storeCtx, username)
 		if err == nil {
 			if !adminUser.IsActive {
 				h.recordFailure(username)
@@ -103,13 +109,14 @@ func (h *AuthHandler) Login(c *gin.Context) {
 				c.JSON(http.StatusUnauthorized, gin.H{"ok": false, "message": "invalid username or password"})
 				return
 			}
-			token, issueErr := issueJWT(adminUser.Username, h.JWTSecret, h.TokenTTL)
+			role, permissions := normalizeRoleAndPermissions(adminUser.Role, adminUser.Permissions, false)
+			token, issueErr := issueJWT(adminUser.Username, tenantID, role, permissions, h.JWTSecret, h.TokenTTL)
 			if issueErr != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "message": "failed to create token"})
 				return
 			}
 			h.clearFailures(username)
-			_ = h.Store.UpdateAdminUserLastLogin(c.Request.Context(), adminUser.ID, time.Now().UTC())
+			_ = h.Store.UpdateAdminUserLastLogin(storeCtx, adminUser.ID, time.Now().UTC())
 			c.JSON(http.StatusOK, gin.H{"ok": true, "token": token})
 			return
 		}
@@ -136,7 +143,8 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	token, err := issueJWT(h.AdminUsername, h.JWTSecret, h.TokenTTL)
+	role, permissions := normalizeRoleAndPermissions("admin", []string{"read", "write", "admin"}, false)
+	token, err := issueJWT(h.AdminUsername, tenantID, role, permissions, h.JWTSecret, h.TokenTTL)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "message": "failed to create token"})
 		return
@@ -182,6 +190,20 @@ func AuthMiddleware(jwtSecret string) gin.HandlerFunc {
 			if sub, ok := claims["sub"].(string); ok {
 				c.Set("actor", strings.TrimSpace(sub))
 			}
+			tenantID := tenantctx.DefaultTenantID
+			if claimTenantID, ok := claims["tenant_id"].(string); ok {
+				tenantID = tenantctx.MustFromContext(nil, claimTenantID)
+			}
+			role, permissions := claimsRoleAndPermissions(claims)
+			c.Set("role", role)
+			c.Set("permissions", permissions)
+			c.Set("tenant_id", tenantID)
+			c.Request = c.Request.WithContext(tenantctx.WithTenantID(c.Request.Context(), tenantID))
+		} else {
+			c.Set("role", "admin")
+			c.Set("permissions", []string{"read", "write", "admin"})
+			c.Set("tenant_id", tenantctx.DefaultTenantID)
+			c.Request = c.Request.WithContext(tenantctx.WithTenantID(c.Request.Context(), tenantctx.DefaultTenantID))
 		}
 
 		c.Next()
@@ -240,13 +262,112 @@ func (h *AuthHandler) clearFailures(username string) {
 	delete(h.lockedUntil, username)
 }
 
-func issueJWT(subject string, secret string, ttl time.Duration) (string, error) {
+func issueJWT(subject string, tenantID string, role string, permissions []string, secret string, ttl time.Duration) (string, error) {
 	now := time.Now().UTC()
+	role, permissions = normalizeRoleAndPermissions(role, permissions, false)
 	claims := jwt.MapClaims{
-		"sub": strings.TrimSpace(subject),
-		"iat": now.Unix(),
-		"exp": now.Add(ttl).Unix(),
+		"sub":         strings.TrimSpace(subject),
+		"tenant_id":   tenantctx.MustFromContext(nil, tenantID),
+		"role":        role,
+		"permissions": permissions,
+		"iat":         now.Unix(),
+		"exp":         now.Add(ttl).Unix(),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(strings.TrimSpace(secret)))
+}
+
+func claimsRoleAndPermissions(claims jwt.MapClaims) (string, []string) {
+	role := ""
+	if v, ok := claims["role"].(string); ok {
+		role = v
+	}
+	rawPermissions := make([]string, 0, 4)
+	switch v := claims["permissions"].(type) {
+	case []string:
+		rawPermissions = append(rawPermissions, v...)
+	case []any:
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				rawPermissions = append(rawPermissions, s)
+			}
+		}
+	case string:
+		rawPermissions = append(rawPermissions, v)
+	}
+	return normalizeRoleAndPermissions(role, rawPermissions, true)
+}
+
+func normalizeRoleAndPermissions(role string, permissions []string, legacyAdminFallback bool) (string, []string) {
+	role = strings.ToLower(strings.TrimSpace(role))
+	normPerms := normalizePermissions(permissions)
+
+	if role != "admin" && role != "editor" && role != "viewer" {
+		role = ""
+	}
+
+	if len(normPerms) == 0 {
+		if role == "" {
+			if legacyAdminFallback {
+				return "admin", []string{"read", "write", "admin"}
+			}
+			return "viewer", []string{"read"}
+		}
+		switch role {
+		case "admin":
+			return "admin", []string{"read", "write", "admin"}
+		case "editor":
+			return "editor", []string{"read", "write"}
+		default:
+			return "viewer", []string{"read"}
+		}
+	}
+
+	// admin implies all permissions
+	if hasPermission(normPerms, "admin") {
+		return "admin", []string{"read", "write", "admin"}
+	}
+	// write implies read
+	if hasPermission(normPerms, "write") && !hasPermission(normPerms, "read") {
+		normPerms = append(normPerms, "read")
+		normPerms = normalizePermissions(normPerms)
+	}
+
+	if role == "" {
+		if hasPermission(normPerms, "write") {
+			role = "editor"
+		} else {
+			role = "viewer"
+		}
+	}
+	return role, normPerms
+}
+
+func normalizePermissions(permissions []string) []string {
+	seen := map[string]bool{}
+	for _, p := range permissions {
+		v := strings.ToLower(strings.TrimSpace(p))
+		for _, supported := range supportedPermissions {
+			if v == supported {
+				seen[v] = true
+			}
+		}
+	}
+
+	out := make([]string, 0, len(supportedPermissions))
+	for _, p := range supportedPermissions {
+		if seen[p] {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func hasPermission(permissions []string, target string) bool {
+	for _, p := range permissions {
+		if p == target {
+			return true
+		}
+	}
+	return false
 }

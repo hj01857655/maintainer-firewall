@@ -26,11 +26,23 @@ type mockRulesStore struct {
 	lastEvent        string
 	lastKey          string
 	lastActive       bool
+	versionLimit     int
+	versionOffset    int
 	updatedID        int64
 	updatedIsActive  bool
 	updateShouldFail bool
 	filterOptions    store.RuleFilterOptions
 	filterErr        error
+	versionItems     []store.RuleVersionRecord
+	versionTotal     int64
+	publishVersion   int64
+	publishCount     int
+	publishErr       error
+	publishActor     string
+	publishSource    int64
+	rollbackErr      error
+	restoredCount    int
+	versionRules     map[int64][]store.RuleRecord
 }
 
 func (m *mockRulesStore) ListRules(_ context.Context, limit int, offset int, eventType string, keyword string, activeOnly bool) ([]store.RuleRecord, int64, error) {
@@ -71,6 +83,42 @@ func (m *mockRulesStore) UpdateRuleActive(_ context.Context, id int64, isActive 
 
 func (m *mockRulesStore) SaveAuditLog(_ context.Context, _ store.AuditLogRecord) error {
 	return nil
+}
+
+func (m *mockRulesStore) CreateRuleVersionSnapshot(_ context.Context, actor string, sourceVersion int64) (int64, int, error) {
+	m.publishActor = actor
+	m.publishSource = sourceVersion
+	if m.publishErr != nil {
+		return 0, 0, m.publishErr
+	}
+	if m.publishVersion == 0 {
+		m.publishVersion = 1
+	}
+	return m.publishVersion, m.publishCount, nil
+}
+
+func (m *mockRulesStore) ListRuleVersions(_ context.Context, limit int, offset int) ([]store.RuleVersionRecord, int64, error) {
+	m.versionLimit = limit
+	m.versionOffset = offset
+	return m.versionItems, m.versionTotal, nil
+}
+
+func (m *mockRulesStore) GetRulesByVersion(_ context.Context, version int64) ([]store.RuleRecord, error) {
+	if m.versionRules == nil {
+		return nil, fmt.Errorf("rule version not found")
+	}
+	items, ok := m.versionRules[version]
+	if !ok {
+		return nil, fmt.Errorf("rule version not found")
+	}
+	return items, nil
+}
+
+func (m *mockRulesStore) RestoreRulesFromVersion(_ context.Context, _ int64) (int, error) {
+	if m.rollbackErr != nil {
+		return 0, m.rollbackErr
+	}
+	return m.restoredCount, nil
 }
 
 func TestRulesList_WithFilters(t *testing.T) {
@@ -242,5 +290,212 @@ func TestRulesFilterOptions_StoreError(t *testing.T) {
 
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d, body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestRulesPublishVersion_Success(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewRulesHandler(&mockRulesStore{publishVersion: 3, publishCount: 7})
+	r := gin.New()
+	r.POST("/rules/publish", h.PublishVersion)
+
+	req := httptest.NewRequest(http.MethodPost, "/rules/publish", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestRulesPublishVersion_StoreError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewRulesHandler(&mockRulesStore{publishErr: errors.New("db down")})
+	r := gin.New()
+	r.POST("/rules/publish", h.PublishVersion)
+
+	req := httptest.NewRequest(http.MethodPost, "/rules/publish", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d, body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestRulesListVersions_Success(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewRulesHandler(&mockRulesStore{
+		versionItems: []store.RuleVersionRecord{{Version: 2, RuleCount: 5, CreatedBy: "admin"}},
+		versionTotal: 1,
+	})
+	r := gin.New()
+	r.GET("/rules/versions", h.ListVersions)
+
+	req := httptest.NewRequest(http.MethodGet, "/rules/versions?limit=10&offset=0", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestRulesListVersions_LimitOffsetBoundary(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	mockStore := &mockRulesStore{}
+	h := NewRulesHandler(mockStore)
+	r := gin.New()
+	r.GET("/rules/versions", h.ListVersions)
+
+	req := httptest.NewRequest(http.MethodGet, "/rules/versions?limit=999&offset=-10", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", w.Code, w.Body.String())
+	}
+	if mockStore.versionLimit != 100 || mockStore.versionOffset != 0 {
+		t.Fatalf("expected clamped limit/offset = 100/0, got %d/%d", mockStore.versionLimit, mockStore.versionOffset)
+	}
+}
+
+func TestRulesRollback_NotFound(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewRulesHandler(&mockRulesStore{rollbackErr: fmt.Errorf("rule version not found")})
+	r := gin.New()
+	r.POST("/rules/rollback", h.Rollback)
+
+	req := httptest.NewRequest(http.MethodPost, "/rules/rollback", strings.NewReader(`{"version":9}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestRulesRollback_Success(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	mockStore := &mockRulesStore{
+		restoredCount:  9,
+		publishVersion: 12,
+	}
+	h := NewRulesHandler(mockStore)
+	r := gin.New()
+	r.POST("/rules/rollback", h.Rollback)
+
+	req := httptest.NewRequest(http.MethodPost, "/rules/rollback", strings.NewReader(`{"version":5}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		OK            bool  `json:"ok"`
+		FromVersion   int64 `json:"from_version"`
+		ToVersion     int64 `json:"to_version"`
+		RestoredCount int   `json:"restored_count"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if !resp.OK || resp.FromVersion != 5 || resp.ToVersion != 12 || resp.RestoredCount != 9 {
+		t.Fatalf("unexpected response: %s", w.Body.String())
+	}
+	if mockStore.publishSource != 5 {
+		t.Fatalf("expected rollback snapshot source version=5, got %d", mockStore.publishSource)
+	}
+}
+
+func TestRulesReplay_ByVersionSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewRulesHandler(&mockRulesStore{
+		versionRules: map[int64][]store.RuleRecord{
+			2: {
+				{
+					EventType:       "issues",
+					Keyword:         "urgent",
+					SuggestionType:  "label",
+					SuggestionValue: "P0",
+					Reason:          "r",
+					IsActive:        true,
+				},
+			},
+		},
+	})
+	r := gin.New()
+	r.POST("/rules/replay", h.Replay)
+
+	body := `{"version":2,"event_type":"issues","payload":{"issue":{"title":"urgent bug","body":"please fix"}}}`
+	req := httptest.NewRequest(http.MethodPost, "/rules/replay", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestRulesReplay_CurrentActiveSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	mockStore := &mockRulesStore{
+		items: []store.RuleRecord{
+			{
+				EventType:       "issues",
+				Keyword:         "urgent",
+				SuggestionType:  "label",
+				SuggestionValue: "P0",
+				Reason:          "r",
+				IsActive:        true,
+			},
+		},
+		total: 1,
+	}
+	h := NewRulesHandler(mockStore)
+	r := gin.New()
+	r.POST("/rules/replay", h.Replay)
+
+	body := `{"event_type":"issues","payload":{"issue":{"title":"urgent bug"}}}`
+	req := httptest.NewRequest(http.MethodPost, "/rules/replay", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	if mockStore.lastLimit != 1000 || mockStore.lastOffset != 0 || mockStore.lastEvent != "" || mockStore.lastKey != "" || !mockStore.lastActive {
+		t.Fatalf("unexpected replay list args: %+v", mockStore)
+	}
+
+	var resp struct {
+		OK          bool  `json:"ok"`
+		Version     int64 `json:"version"`
+		RuleCount   int   `json:"rule_count"`
+		Suggestions []any `json:"suggestions"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if !resp.OK || resp.Version != 0 || resp.RuleCount != 1 || len(resp.Suggestions) == 0 {
+		t.Fatalf("unexpected response: %s", w.Body.String())
+	}
+}
+
+func TestRulesReplay_InvalidEventType(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewRulesHandler(&mockRulesStore{})
+	r := gin.New()
+	r.POST("/rules/replay", h.Replay)
+
+	req := httptest.NewRequest(http.MethodPost, "/rules/replay", strings.NewReader(`{"event_type":"push","payload":{}}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", w.Code, w.Body.String())
 	}
 }

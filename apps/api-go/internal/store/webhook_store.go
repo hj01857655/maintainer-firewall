@@ -2,11 +2,14 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
+
+	"maintainer-firewall/api-go/internal/tenantctx"
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5"
@@ -61,13 +64,21 @@ type RuleRecord struct {
 	CreatedAt       time.Time `json:"created_at"`
 }
 
+type RuleVersionRecord struct {
+	Version       int64     `json:"version"`
+	RuleCount     int       `json:"rule_count"`
+	CreatedBy     string    `json:"created_by"`
+	SourceVersion int64     `json:"source_version,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
 type AdminUser struct {
 	ID           int64      `json:"id"`
 	Username     string     `json:"username"`
 	PasswordHash string     `json:"password_hash"`
 	IsActive     bool       `json:"is_active"`
-	Role         string     `json:"role"`         // admin, editor, viewer
-	Permissions  []string   `json:"permissions"`  // read, write, admin
+	Role         string     `json:"role"`        // admin, editor, viewer
+	Permissions  []string   `json:"permissions"` // read, write, admin
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
 	LastLoginAt  *time.Time `json:"last_login_at,omitempty"`
@@ -111,6 +122,14 @@ type RuleFilterOptions struct {
 	ActiveStates    []string `json:"active_states"`
 }
 
+type TenantRecord struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	IsActive  bool      `json:"is_active"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type ActionExecutionFailureRecord struct {
 	ID int64 `json:"id"`
 	ActionExecutionFailure
@@ -135,11 +154,18 @@ type DeliveryMetric struct {
 }
 
 type MetricsOverview struct {
-	Events24h       int64   `json:"events_24h"`
-	Alerts24h       int64   `json:"alerts_24h"`
-	Failures24h     int64   `json:"failures_24h"`
-	SuccessRate24h  float64 `json:"success_rate_24h"`
-	P95LatencyMS24h float64 `json:"p95_latency_ms_24h"`
+	Events24h                 int64   `json:"events_24h"`
+	Alerts24h                 int64   `json:"alerts_24h"`
+	Failures24h               int64   `json:"failures_24h"`
+	SuccessRate24h            float64 `json:"success_rate_24h"`
+	P95LatencyMS24h           float64 `json:"p95_latency_ms_24h"`
+	DeliveryAttempts          int64   `json:"delivery_attempts"`
+	DeliverySuccess           int64   `json:"delivery_success"`
+	ResolvedFailures24h       int64   `json:"resolved_failures_24h"`
+	AutomationCoverage24h     float64 `json:"automation_coverage_24h"`
+	FailureRate24h            float64 `json:"failure_rate_24h"`
+	EstimatedManualMinutes24h float64 `json:"estimated_manual_minutes_24h"`
+	AvgProcessingMS24h        float64 `json:"avg_processing_ms_24h"`
 }
 
 type MetricsTimePoint struct {
@@ -174,6 +200,13 @@ type WebhookStore interface {
 	SaveDeliveryMetric(ctx context.Context, metric DeliveryMetric) error
 	GetMetricsOverview(ctx context.Context, since time.Time) (MetricsOverview, error)
 	GetMetricsTimeSeries(ctx context.Context, since time.Time, intervalMinutes int) ([]MetricsTimePoint, error)
+	ListTenants(ctx context.Context) ([]TenantRecord, error)
+	CreateTenant(ctx context.Context, id string, name string) error
+	UpdateTenantActive(ctx context.Context, id string, isActive bool) error
+	CreateRuleVersionSnapshot(ctx context.Context, createdBy string, sourceVersion int64) (int64, int, error)
+	ListRuleVersions(ctx context.Context, limit int, offset int) ([]RuleVersionRecord, int64, error)
+	GetRulesByVersion(ctx context.Context, version int64) ([]RuleRecord, error)
+	RestoreRulesFromVersion(ctx context.Context, version int64) (int, error)
 	UserStore
 }
 
@@ -225,14 +258,19 @@ func (s *WebhookEventStore) Close() {
 	}
 }
 
+func tenantIDFromCtx(ctx context.Context) string {
+	return tenantctx.MustFromContext(ctx, tenantctx.DefaultTenantID)
+}
+
 func (s *WebhookEventStore) SaveEvent(ctx context.Context, evt WebhookEvent) error {
+	tenantID := tenantIDFromCtx(ctx)
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO webhook_events (
-			delivery_id, event_type, action,
+			tenant_id, delivery_id, event_type, action,
 			repository_full_name, sender_login, payload_json
-		) VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (delivery_id) DO NOTHING
-	`, evt.DeliveryID, evt.EventType, evt.Action, evt.RepositoryFullName, evt.SenderLogin, evt.PayloadJSON)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (tenant_id, delivery_id) DO NOTHING
+	`, tenantID, evt.DeliveryID, evt.EventType, evt.Action, evt.RepositoryFullName, evt.SenderLogin, evt.PayloadJSON)
 	if err != nil {
 		return fmt.Errorf("insert webhook event: %w", err)
 	}
@@ -240,13 +278,14 @@ func (s *WebhookEventStore) SaveEvent(ctx context.Context, evt WebhookEvent) err
 }
 
 func (s *WebhookEventStore) SaveAlert(ctx context.Context, alert AlertRecord) error {
+	tenantID := tenantIDFromCtx(ctx)
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO webhook_alerts (
-			delivery_id, event_type, action, repository_full_name,
+			tenant_id, delivery_id, event_type, action, repository_full_name,
 			sender_login, rule_matched, suggestion_type, suggestion_value, reason
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		ON CONFLICT (delivery_id, suggestion_type, suggestion_value, rule_matched) DO NOTHING
-	`, alert.DeliveryID, alert.EventType, alert.Action, alert.RepositoryFullName, alert.SenderLogin, alert.RuleMatched, alert.SuggestionType, alert.SuggestionValue, alert.Reason)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		ON CONFLICT (tenant_id, delivery_id, suggestion_type, suggestion_value, rule_matched) DO NOTHING
+	`, tenantID, alert.DeliveryID, alert.EventType, alert.Action, alert.RepositoryFullName, alert.SenderLogin, alert.RuleMatched, alert.SuggestionType, alert.SuggestionValue, alert.Reason)
 	if err != nil {
 		return fmt.Errorf("insert webhook alert: %w", err)
 	}
@@ -254,6 +293,7 @@ func (s *WebhookEventStore) SaveAlert(ctx context.Context, alert AlertRecord) er
 }
 
 func (s *WebhookEventStore) ListEvents(ctx context.Context, limit int, offset int, eventType string, action string) ([]WebhookEventRecord, int64, error) {
+	tenantID := tenantIDFromCtx(ctx)
 	et := strings.TrimSpace(eventType)
 	ac := strings.TrimSpace(action)
 
@@ -261,20 +301,22 @@ func (s *WebhookEventStore) ListEvents(ctx context.Context, limit int, offset in
 	if err := s.pool.QueryRow(ctx, `
 		SELECT COUNT(*)
 		FROM webhook_events
-		WHERE ($1 = '' OR event_type = $1)
-		  AND ($2 = '' OR action = $2)
-	`, et, ac).Scan(&total); err != nil {
+		WHERE tenant_id = $1
+		  AND ($2 = '' OR event_type = $2)
+		  AND ($3 = '' OR action = $3)
+	`, tenantID, et, ac).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count webhook events: %w", err)
 	}
 
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, delivery_id, event_type, action, repository_full_name, sender_login, payload_json, received_at
 		FROM webhook_events
-		WHERE ($1 = '' OR event_type = $1)
-		  AND ($2 = '' OR action = $2)
+		WHERE tenant_id = $1
+		  AND ($2 = '' OR event_type = $2)
+		  AND ($3 = '' OR action = $3)
 		ORDER BY received_at DESC
-		LIMIT $3 OFFSET $4
-	`, et, ac, limit, offset)
+		LIMIT $4 OFFSET $5
+	`, tenantID, et, ac, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("query webhook events: %w", err)
 	}
@@ -306,6 +348,7 @@ func (s *WebhookEventStore) ListEvents(ctx context.Context, limit int, offset in
 }
 
 func (s *WebhookEventStore) ListAlerts(ctx context.Context, limit int, offset int, eventType string, action string, suggestionType string) ([]AlertRecord, int64, error) {
+	tenantID := tenantIDFromCtx(ctx)
 	et := strings.TrimSpace(eventType)
 	ac := strings.TrimSpace(action)
 	st := strings.TrimSpace(suggestionType)
@@ -314,10 +357,11 @@ func (s *WebhookEventStore) ListAlerts(ctx context.Context, limit int, offset in
 	if err := s.pool.QueryRow(ctx, `
 		SELECT COUNT(*)
 		FROM webhook_alerts
-		WHERE ($1 = '' OR event_type = $1)
-		  AND ($2 = '' OR action = $2)
-		  AND ($3 = '' OR suggestion_type = $3)
-	`, et, ac, st).Scan(&total); err != nil {
+		WHERE tenant_id = $1
+		  AND ($2 = '' OR event_type = $2)
+		  AND ($3 = '' OR action = $3)
+		  AND ($4 = '' OR suggestion_type = $4)
+	`, tenantID, et, ac, st).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count webhook alerts: %w", err)
 	}
 
@@ -325,12 +369,13 @@ func (s *WebhookEventStore) ListAlerts(ctx context.Context, limit int, offset in
 		SELECT delivery_id, event_type, action, repository_full_name, sender_login,
 		       rule_matched, suggestion_type, suggestion_value, reason, created_at
 		FROM webhook_alerts
-		WHERE ($1 = '' OR event_type = $1)
-		  AND ($2 = '' OR action = $2)
-		  AND ($3 = '' OR suggestion_type = $3)
+		WHERE tenant_id = $1
+		  AND ($2 = '' OR event_type = $2)
+		  AND ($3 = '' OR action = $3)
+		  AND ($4 = '' OR suggestion_type = $4)
 		ORDER BY created_at DESC
-		LIMIT $4 OFFSET $5
-	`, et, ac, st, limit, offset)
+		LIMIT $5 OFFSET $6
+	`, tenantID, et, ac, st, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("query webhook alerts: %w", err)
 	}
@@ -364,6 +409,7 @@ func (s *WebhookEventStore) ListAlerts(ctx context.Context, limit int, offset in
 }
 
 func (s *WebhookEventStore) ListRules(ctx context.Context, limit int, offset int, eventType string, keyword string, activeOnly bool) ([]RuleRecord, int64, error) {
+	tenantID := tenantIDFromCtx(ctx)
 	et := strings.TrimSpace(eventType)
 	kw := strings.TrimSpace(keyword)
 
@@ -371,22 +417,24 @@ func (s *WebhookEventStore) ListRules(ctx context.Context, limit int, offset int
 	if err := s.pool.QueryRow(ctx, `
 		SELECT COUNT(*)
 		FROM webhook_rules
-		WHERE ($1 = '' OR event_type = $1)
-		  AND ($2 = '' OR keyword ILIKE '%' || $2 || '%')
-		  AND (NOT $3 OR is_active = true)
-	`, et, kw, activeOnly).Scan(&total); err != nil {
+		WHERE tenant_id = $1
+		  AND ($2 = '' OR event_type = $2)
+		  AND ($3 = '' OR keyword ILIKE '%' || $3 || '%')
+		  AND (NOT $4 OR is_active = true)
+	`, tenantID, et, kw, activeOnly).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count webhook rules: %w", err)
 	}
 
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, event_type, keyword, suggestion_type, suggestion_value, reason, is_active, created_at
 		FROM webhook_rules
-		WHERE ($1 = '' OR event_type = $1)
-		  AND ($2 = '' OR keyword ILIKE '%' || $2 || '%')
-		  AND (NOT $3 OR is_active = true)
+		WHERE tenant_id = $1
+		  AND ($2 = '' OR event_type = $2)
+		  AND ($3 = '' OR keyword ILIKE '%' || $3 || '%')
+		  AND (NOT $4 OR is_active = true)
 		ORDER BY created_at DESC
-		LIMIT $4 OFFSET $5
-	`, et, kw, activeOnly, limit, offset)
+		LIMIT $5 OFFSET $6
+	`, tenantID, et, kw, activeOnly, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("query webhook rules: %w", err)
 	}
@@ -406,8 +454,8 @@ func (s *WebhookEventStore) ListRules(ctx context.Context, limit int, offset int
 	return items, total, nil
 }
 
-func listDistinctNonEmpty(ctx context.Context, pool *pgxpool.Pool, q string) ([]string, error) {
-	rows, err := pool.Query(ctx, q)
+func listDistinctNonEmpty(ctx context.Context, pool *pgxpool.Pool, q string, args ...any) ([]string, error) {
+	rows, err := pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -430,19 +478,20 @@ func listDistinctNonEmpty(ctx context.Context, pool *pgxpool.Pool, q string) ([]
 }
 
 func (s *WebhookEventStore) ListEventFilterOptions(ctx context.Context) (EventFilterOptions, error) {
-	et, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT event_type FROM webhook_events WHERE event_type <> '' ORDER BY event_type ASC`)
+	tenantID := tenantIDFromCtx(ctx)
+	et, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT event_type FROM webhook_events WHERE tenant_id = $1 AND event_type <> '' ORDER BY event_type ASC`, tenantID)
 	if err != nil {
 		return EventFilterOptions{}, fmt.Errorf("list distinct event_type from webhook_events: %w", err)
 	}
-	ac, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT action FROM webhook_events WHERE action <> '' ORDER BY action ASC`)
+	ac, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT action FROM webhook_events WHERE tenant_id = $1 AND action <> '' ORDER BY action ASC`, tenantID)
 	if err != nil {
 		return EventFilterOptions{}, fmt.Errorf("list distinct action from webhook_events: %w", err)
 	}
-	repo, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT repository_full_name FROM webhook_events WHERE repository_full_name <> '' ORDER BY repository_full_name ASC`)
+	repo, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT repository_full_name FROM webhook_events WHERE tenant_id = $1 AND repository_full_name <> '' ORDER BY repository_full_name ASC`, tenantID)
 	if err != nil {
 		return EventFilterOptions{}, fmt.Errorf("list distinct repository from webhook_events: %w", err)
 	}
-	sender, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT sender_login FROM webhook_events WHERE sender_login <> '' ORDER BY sender_login ASC`)
+	sender, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT sender_login FROM webhook_events WHERE tenant_id = $1 AND sender_login <> '' ORDER BY sender_login ASC`, tenantID)
 	if err != nil {
 		return EventFilterOptions{}, fmt.Errorf("list distinct sender from webhook_events: %w", err)
 	}
@@ -450,23 +499,24 @@ func (s *WebhookEventStore) ListEventFilterOptions(ctx context.Context) (EventFi
 }
 
 func (s *WebhookEventStore) ListAlertFilterOptions(ctx context.Context) (AlertFilterOptions, error) {
-	et, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT event_type FROM webhook_alerts WHERE event_type <> '' ORDER BY event_type ASC`)
+	tenantID := tenantIDFromCtx(ctx)
+	et, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT event_type FROM webhook_alerts WHERE tenant_id = $1 AND event_type <> '' ORDER BY event_type ASC`, tenantID)
 	if err != nil {
 		return AlertFilterOptions{}, fmt.Errorf("list distinct event_type from webhook_alerts: %w", err)
 	}
-	ac, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT action FROM webhook_alerts WHERE action <> '' ORDER BY action ASC`)
+	ac, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT action FROM webhook_alerts WHERE tenant_id = $1 AND action <> '' ORDER BY action ASC`, tenantID)
 	if err != nil {
 		return AlertFilterOptions{}, fmt.Errorf("list distinct action from webhook_alerts: %w", err)
 	}
-	st, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT suggestion_type FROM webhook_alerts WHERE suggestion_type <> '' ORDER BY suggestion_type ASC`)
+	st, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT suggestion_type FROM webhook_alerts WHERE tenant_id = $1 AND suggestion_type <> '' ORDER BY suggestion_type ASC`, tenantID)
 	if err != nil {
 		return AlertFilterOptions{}, fmt.Errorf("list distinct suggestion_type from webhook_alerts: %w", err)
 	}
-	repo, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT repository_full_name FROM webhook_alerts WHERE repository_full_name <> '' ORDER BY repository_full_name ASC`)
+	repo, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT repository_full_name FROM webhook_alerts WHERE tenant_id = $1 AND repository_full_name <> '' ORDER BY repository_full_name ASC`, tenantID)
 	if err != nil {
 		return AlertFilterOptions{}, fmt.Errorf("list distinct repository from webhook_alerts: %w", err)
 	}
-	sender, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT sender_login FROM webhook_alerts WHERE sender_login <> '' ORDER BY sender_login ASC`)
+	sender, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT sender_login FROM webhook_alerts WHERE tenant_id = $1 AND sender_login <> '' ORDER BY sender_login ASC`, tenantID)
 	if err != nil {
 		return AlertFilterOptions{}, fmt.Errorf("list distinct sender from webhook_alerts: %w", err)
 	}
@@ -474,15 +524,16 @@ func (s *WebhookEventStore) ListAlertFilterOptions(ctx context.Context) (AlertFi
 }
 
 func (s *WebhookEventStore) ListRuleFilterOptions(ctx context.Context) (RuleFilterOptions, error) {
-	et, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT event_type FROM webhook_rules WHERE event_type <> '' ORDER BY event_type ASC`)
+	tenantID := tenantIDFromCtx(ctx)
+	et, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT event_type FROM webhook_rules WHERE tenant_id = $1 AND event_type <> '' ORDER BY event_type ASC`, tenantID)
 	if err != nil {
 		return RuleFilterOptions{}, fmt.Errorf("list distinct event_type from webhook_rules: %w", err)
 	}
-	st, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT suggestion_type FROM webhook_rules WHERE suggestion_type <> '' ORDER BY suggestion_type ASC`)
+	st, err := listDistinctNonEmpty(ctx, s.pool, `SELECT DISTINCT suggestion_type FROM webhook_rules WHERE tenant_id = $1 AND suggestion_type <> '' ORDER BY suggestion_type ASC`, tenantID)
 	if err != nil {
 		return RuleFilterOptions{}, fmt.Errorf("list distinct suggestion_type from webhook_rules: %w", err)
 	}
-	rows, err := s.pool.Query(ctx, `SELECT DISTINCT is_active FROM webhook_rules ORDER BY is_active DESC`)
+	rows, err := s.pool.Query(ctx, `SELECT DISTINCT is_active FROM webhook_rules WHERE tenant_id = $1 ORDER BY is_active DESC`, tenantID)
 	if err != nil {
 		return RuleFilterOptions{}, fmt.Errorf("list distinct is_active from webhook_rules: %w", err)
 	}
@@ -505,14 +556,14 @@ func (s *WebhookEventStore) ListRuleFilterOptions(ctx context.Context) (RuleFilt
 	return RuleFilterOptions{EventTypes: et, SuggestionTypes: st, ActiveStates: activeStates}, nil
 }
 
-
 func (s *WebhookEventStore) CreateRule(ctx context.Context, rule RuleRecord) (int64, error) {
+	tenantID := tenantIDFromCtx(ctx)
 	var id int64
 	err := s.pool.QueryRow(ctx, `
-		INSERT INTO webhook_rules (event_type, keyword, suggestion_type, suggestion_value, reason, is_active)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO webhook_rules (tenant_id, event_type, keyword, suggestion_type, suggestion_value, reason, is_active)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id
-	`, strings.TrimSpace(rule.EventType), strings.TrimSpace(rule.Keyword), strings.TrimSpace(rule.SuggestionType), strings.TrimSpace(rule.SuggestionValue), strings.TrimSpace(rule.Reason), rule.IsActive).Scan(&id)
+	`, tenantID, strings.TrimSpace(rule.EventType), strings.TrimSpace(rule.Keyword), strings.TrimSpace(rule.SuggestionType), strings.TrimSpace(rule.SuggestionValue), strings.TrimSpace(rule.Reason), rule.IsActive).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("insert webhook rule: %w", err)
 	}
@@ -520,11 +571,13 @@ func (s *WebhookEventStore) CreateRule(ctx context.Context, rule RuleRecord) (in
 }
 
 func (s *WebhookEventStore) UpdateRuleActive(ctx context.Context, id int64, isActive bool) error {
+	tenantID := tenantIDFromCtx(ctx)
 	result, err := s.pool.Exec(ctx, `
 		UPDATE webhook_rules
 		SET is_active = $2
 		WHERE id = $1
-	`, id, isActive)
+		  AND tenant_id = $3
+	`, id, isActive, tenantID)
 	if err != nil {
 		return fmt.Errorf("update webhook rule active: %w", err)
 	}
@@ -534,14 +587,170 @@ func (s *WebhookEventStore) UpdateRuleActive(ctx context.Context, id int64, isAc
 	return nil
 }
 
+func (s *WebhookEventStore) CreateRuleVersionSnapshot(ctx context.Context, createdBy string, sourceVersion int64) (int64, int, error) {
+	tenantID := tenantIDFromCtx(ctx)
+	rules, err := s.listAllRulesByTenant(ctx, tenantID)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	payload, err := json.Marshal(rules)
+	if err != nil {
+		return 0, 0, fmt.Errorf("marshal rules snapshot: %w", err)
+	}
+
+	var version int64
+	if err := s.pool.QueryRow(ctx, `
+		SELECT COALESCE(MAX(version), 0) + 1
+		FROM webhook_rule_versions
+		WHERE tenant_id = $1
+	`, tenantID).Scan(&version); err != nil {
+		return 0, 0, fmt.Errorf("next rule version: %w", err)
+	}
+
+	var src any
+	if sourceVersion > 0 {
+		src = sourceVersion
+	}
+	_, err = s.pool.Exec(ctx, `
+		INSERT INTO webhook_rule_versions (tenant_id, version, rules_json, rule_count, created_by, source_version)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`, tenantID, version, payload, len(rules), strings.TrimSpace(createdBy), src)
+	if err != nil {
+		return 0, 0, fmt.Errorf("insert rule version snapshot: %w", err)
+	}
+	return version, len(rules), nil
+}
+
+func (s *WebhookEventStore) ListRuleVersions(ctx context.Context, limit int, offset int) ([]RuleVersionRecord, int64, error) {
+	tenantID := tenantIDFromCtx(ctx)
+	var total int64
+	if err := s.pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM webhook_rule_versions
+		WHERE tenant_id = $1
+	`, tenantID).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count rule versions: %w", err)
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT version, rule_count, created_by, COALESCE(source_version, 0), created_at
+		FROM webhook_rule_versions
+		WHERE tenant_id = $1
+		ORDER BY version DESC
+		LIMIT $2 OFFSET $3
+	`, tenantID, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("query rule versions: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]RuleVersionRecord, 0, limit)
+	for rows.Next() {
+		var item RuleVersionRecord
+		if err := rows.Scan(&item.Version, &item.RuleCount, &item.CreatedBy, &item.SourceVersion, &item.CreatedAt); err != nil {
+			return nil, 0, fmt.Errorf("scan rule version: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate rule versions: %w", err)
+	}
+	return items, total, nil
+}
+
+func (s *WebhookEventStore) GetRulesByVersion(ctx context.Context, version int64) ([]RuleRecord, error) {
+	tenantID := tenantIDFromCtx(ctx)
+	var payload []byte
+	err := s.pool.QueryRow(ctx, `
+		SELECT rules_json
+		FROM webhook_rule_versions
+		WHERE tenant_id = $1
+		  AND version = $2
+		LIMIT 1
+	`, tenantID, version).Scan(&payload)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "no rows") {
+			return nil, fmt.Errorf("rule version not found")
+		}
+		return nil, fmt.Errorf("get rules by version: %w", err)
+	}
+
+	var items []RuleRecord
+	if err := json.Unmarshal(payload, &items); err != nil {
+		return nil, fmt.Errorf("unmarshal rules snapshot: %w", err)
+	}
+	return items, nil
+}
+
+func (s *WebhookEventStore) RestoreRulesFromVersion(ctx context.Context, version int64) (int, error) {
+	tenantID := tenantIDFromCtx(ctx)
+	rules, err := s.GetRulesByVersion(ctx, version)
+	if err != nil {
+		return 0, err
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin restore rules tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `DELETE FROM webhook_rules WHERE tenant_id = $1`, tenantID); err != nil {
+		return 0, fmt.Errorf("clear tenant rules before restore: %w", err)
+	}
+
+	for _, r := range rules {
+		_, err := tx.Exec(ctx, `
+			INSERT INTO webhook_rules (tenant_id, event_type, keyword, suggestion_type, suggestion_value, reason, is_active)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
+		`, tenantID, strings.TrimSpace(r.EventType), strings.TrimSpace(r.Keyword), strings.TrimSpace(r.SuggestionType), strings.TrimSpace(r.SuggestionValue), strings.TrimSpace(r.Reason), r.IsActive)
+		if err != nil {
+			return 0, fmt.Errorf("restore webhook rule: %w", err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit restore rules tx: %w", err)
+	}
+	return len(rules), nil
+}
+
+func (s *WebhookEventStore) listAllRulesByTenant(ctx context.Context, tenantID string) ([]RuleRecord, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, event_type, keyword, suggestion_type, suggestion_value, reason, is_active, created_at
+		FROM webhook_rules
+		WHERE tenant_id = $1
+		ORDER BY created_at ASC, id ASC
+	`, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("query all webhook rules: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]RuleRecord, 0, 64)
+	for rows.Next() {
+		var rec RuleRecord
+		if err := rows.Scan(&rec.ID, &rec.EventType, &rec.Keyword, &rec.SuggestionType, &rec.SuggestionValue, &rec.Reason, &rec.IsActive, &rec.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan all webhook rule rows: %w", err)
+		}
+		items = append(items, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate all webhook rules: %w", err)
+	}
+	return items, nil
+}
+
 func (s *WebhookEventStore) SaveActionExecutionFailure(ctx context.Context, item ActionExecutionFailure) error {
+	tenantID := tenantIDFromCtx(ctx)
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO webhook_action_failures (
-			delivery_id, event_type, action, repository_full_name,
+			tenant_id, delivery_id, event_type, action, repository_full_name,
 			suggestion_type, suggestion_value, error_message, attempt_count,
 			retry_count, last_retry_status, last_retry_message, last_retry_at, is_resolved
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0,'never','',NULL,FALSE)
-	`, item.DeliveryID, item.EventType, item.Action, item.RepositoryFullName, item.SuggestionType, item.SuggestionValue, item.ErrorMessage, item.AttemptCount)
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,'never','',NULL,FALSE)
+	`, tenantID, item.DeliveryID, item.EventType, item.Action, item.RepositoryFullName, item.SuggestionType, item.SuggestionValue, item.ErrorMessage, item.AttemptCount)
 	if err != nil {
 		return fmt.Errorf("insert webhook action failure: %w", err)
 	}
@@ -549,18 +758,20 @@ func (s *WebhookEventStore) SaveActionExecutionFailure(ctx context.Context, item
 }
 
 func (s *WebhookEventStore) ListActionExecutionFailures(ctx context.Context, limit int, offset int, includeResolved bool) ([]ActionExecutionFailureRecord, int64, error) {
+	tenantID := tenantIDFromCtx(ctx)
 	var total int64
-	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM webhook_action_failures WHERE ($1 OR NOT is_resolved)`, includeResolved).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("count action failures: %w", err)
+	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM webhook_action_failures WHERE tenant_id = $1 AND ($2 OR is_resolved = FALSE)`, tenantID, includeResolved).Scan(&total); err != nil {
+
 	}
 
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, delivery_id, event_type, action, repository_full_name, suggestion_type, suggestion_value, error_message, attempt_count, retry_count, last_retry_status, last_retry_message, COALESCE(last_retry_at, 'epoch'::timestamptz), is_resolved, occurred_at
 		FROM webhook_action_failures
-		WHERE ($1 OR NOT is_resolved)
-		ORDER BY occurred_at DESC
-		LIMIT $2 OFFSET $3
-	`, includeResolved, limit, offset)
+		WHERE tenant_id = $1
+		  AND ($2 OR is_resolved = FALSE)
+
+		LIMIT $3 OFFSET $4
+	`, tenantID, includeResolved, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("query action failures: %w", err)
 	}
@@ -575,7 +786,7 @@ func (s *WebhookEventStore) ListActionExecutionFailures(ctx context.Context, lim
 		if rec.LastRetryAt.Equal(time.Unix(0, 0).UTC()) {
 			rec.LastRetryAt = time.Time{}
 		}
-		items = append(items, rec)
+
 	}
 	if err := rows.Err(); err != nil {
 		return nil, 0, fmt.Errorf("iterate action failures: %w", err)
@@ -584,12 +795,14 @@ func (s *WebhookEventStore) ListActionExecutionFailures(ctx context.Context, lim
 }
 
 func (s *WebhookEventStore) GetActionExecutionFailureByID(ctx context.Context, id int64) (ActionExecutionFailureRecord, error) {
+	tenantID := tenantIDFromCtx(ctx)
 	var rec ActionExecutionFailureRecord
 	err := s.pool.QueryRow(ctx, `
 		SELECT id, delivery_id, event_type, action, repository_full_name, suggestion_type, suggestion_value, error_message, attempt_count, retry_count, last_retry_status, last_retry_message, COALESCE(last_retry_at, 'epoch'::timestamptz), is_resolved, occurred_at
 		FROM webhook_action_failures
 		WHERE id = $1
-	`, id).Scan(&rec.ID, &rec.DeliveryID, &rec.EventType, &rec.Action, &rec.RepositoryFullName, &rec.SuggestionType, &rec.SuggestionValue, &rec.ErrorMessage, &rec.AttemptCount, &rec.RetryCount, &rec.LastRetryStatus, &rec.LastRetryMessage, &rec.LastRetryAt, &rec.IsResolved, &rec.OccurredAt)
+		  AND tenant_id = $2
+	`, id, tenantID).Scan(&rec.ID, &rec.DeliveryID, &rec.EventType, &rec.Action, &rec.RepositoryFullName, &rec.SuggestionType, &rec.SuggestionValue, &rec.ErrorMessage, &rec.AttemptCount, &rec.RetryCount, &rec.LastRetryStatus, &rec.LastRetryMessage, &rec.LastRetryAt, &rec.IsResolved, &rec.OccurredAt)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "no rows") {
 			return rec, fmt.Errorf("action failure not found")
@@ -603,6 +816,7 @@ func (s *WebhookEventStore) GetActionExecutionFailureByID(ctx context.Context, i
 }
 
 func (s *WebhookEventStore) UpdateActionFailureRetryResult(ctx context.Context, id int64, success bool, message string) error {
+	tenantID := tenantIDFromCtx(ctx)
 	status := "failed"
 	resolved := false
 	if success {
@@ -617,7 +831,8 @@ func (s *WebhookEventStore) UpdateActionFailureRetryResult(ctx context.Context, 
 		    last_retry_at = NOW(),
 		    is_resolved = $4
 		WHERE id = $1
-	`, id, status, strings.TrimSpace(message), resolved)
+		  AND tenant_id = $5
+	`, id, status, strings.TrimSpace(message), resolved, tenantID)
 	if err != nil {
 		return fmt.Errorf("update action failure retry result: %w", err)
 	}
@@ -628,8 +843,9 @@ func (s *WebhookEventStore) UpdateActionFailureRetryResult(ctx context.Context, 
 }
 
 func (s *WebhookEventStore) GetWebhookEventPayloadByDeliveryID(ctx context.Context, deliveryID string) (json.RawMessage, error) {
+	tenantID := tenantIDFromCtx(ctx)
 	var payload []byte
-	err := s.pool.QueryRow(ctx, `SELECT payload_json FROM webhook_events WHERE delivery_id = $1`, strings.TrimSpace(deliveryID)).Scan(&payload)
+	err := s.pool.QueryRow(ctx, `SELECT payload_json FROM webhook_events WHERE tenant_id = $1 AND delivery_id = $2`, tenantID, strings.TrimSpace(deliveryID)).Scan(&payload)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "no rows") {
 			return nil, fmt.Errorf("webhook event not found")
@@ -640,10 +856,11 @@ func (s *WebhookEventStore) GetWebhookEventPayloadByDeliveryID(ctx context.Conte
 }
 
 func (s *WebhookEventStore) SaveAuditLog(ctx context.Context, item AuditLogRecord) error {
+	tenantID := tenantIDFromCtx(ctx)
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO audit_logs (actor, action, target, target_id, payload)
-		VALUES ($1,$2,$3,$4,$5)
-	`, strings.TrimSpace(item.Actor), strings.TrimSpace(item.Action), strings.TrimSpace(item.Target), strings.TrimSpace(item.TargetID), item.Payload)
+		INSERT INTO audit_logs (tenant_id, actor, action, target, target_id, payload)
+		VALUES ($1,$2,$3,$4,$5,$6)
+	`, tenantID, strings.TrimSpace(item.Actor), strings.TrimSpace(item.Action), strings.TrimSpace(item.Target), strings.TrimSpace(item.TargetID), item.Payload)
 	if err != nil {
 		return fmt.Errorf("insert audit log: %w", err)
 	}
@@ -651,20 +868,26 @@ func (s *WebhookEventStore) SaveAuditLog(ctx context.Context, item AuditLogRecor
 }
 
 func (s *WebhookEventStore) GetAdminUserByUsername(ctx context.Context, username string) (AdminUser, error) {
+	tenantID := tenantIDFromCtx(ctx)
 	var user AdminUser
 	var lastLoginAt time.Time
+	var permissionsJSON string
 	name := strings.TrimSpace(username)
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, username, password_hash, is_active, created_at, updated_at, COALESCE(last_login_at, 'epoch'::timestamptz)
+		SELECT id, username, password_hash, is_active, role, permissions, created_at, updated_at, COALESCE(last_login_at, 'epoch'::timestamptz)
 		FROM admin_users
-		WHERE username = $1
+		WHERE tenant_id = $1
+		  AND username = $2
 		LIMIT 1
-	`, name).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsActive, &user.CreatedAt, &user.UpdatedAt, &lastLoginAt)
+	`, tenantID, name).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsActive, &user.Role, &permissionsJSON, &user.CreatedAt, &user.UpdatedAt, &lastLoginAt)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "no rows") {
 			return user, fmt.Errorf("admin user not found")
 		}
 		return user, fmt.Errorf("get admin user by username: %w", err)
+	}
+	if err := json.Unmarshal([]byte(permissionsJSON), &user.Permissions); err != nil {
+		return user, fmt.Errorf("parse permissions: %w", err)
 	}
 	if !lastLoginAt.Equal(time.Unix(0, 0).UTC()) {
 		ts := lastLoginAt.UTC()
@@ -673,17 +896,19 @@ func (s *WebhookEventStore) GetAdminUserByUsername(ctx context.Context, username
 	return user, nil
 }
 func (s *WebhookEventStore) ListAdminUsers(ctx context.Context, limit int, offset int) ([]AdminUser, int64, error) {
+	tenantID := tenantIDFromCtx(ctx)
 	var total int64
-	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM admin_users`).Scan(&total); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM admin_users WHERE tenant_id = $1`, tenantID).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count admin users: %w", err)
 	}
 
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, username, password_hash, is_active, role, permissions, created_at, updated_at, COALESCE(last_login_at, 'epoch'::timestamptz)
 		FROM admin_users
+		WHERE tenant_id = $1
 		ORDER BY created_at DESC
-		LIMIT $1 OFFSET $2
-	`, limit, offset)
+		LIMIT $2 OFFSET $3
+	`, tenantID, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("query admin users: %w", err)
 	}
@@ -718,6 +943,7 @@ func (s *WebhookEventStore) ListAdminUsers(ctx context.Context, limit int, offse
 }
 
 func (s *WebhookEventStore) CreateAdminUser(ctx context.Context, user AdminUser) (int64, error) {
+	tenantID := tenantIDFromCtx(ctx)
 	permissionsJSON, err := json.Marshal(user.Permissions)
 	if err != nil {
 		return 0, fmt.Errorf("marshal permissions: %w", err)
@@ -725,10 +951,10 @@ func (s *WebhookEventStore) CreateAdminUser(ctx context.Context, user AdminUser)
 
 	var id int64
 	err = s.pool.QueryRow(ctx, `
-		INSERT INTO admin_users (username, password_hash, is_active, role, permissions)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO admin_users (tenant_id, username, password_hash, is_active, role, permissions)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id
-	`, strings.TrimSpace(user.Username), user.PasswordHash, user.IsActive, strings.TrimSpace(user.Role), permissionsJSON).Scan(&id)
+	`, tenantID, strings.TrimSpace(user.Username), user.PasswordHash, user.IsActive, strings.TrimSpace(user.Role), permissionsJSON).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("insert admin user: %w", err)
 	}
@@ -737,6 +963,7 @@ func (s *WebhookEventStore) CreateAdminUser(ctx context.Context, user AdminUser)
 }
 
 func (s *WebhookEventStore) UpdateAdminUser(ctx context.Context, id int64, user AdminUser) error {
+	tenantID := tenantIDFromCtx(ctx)
 	permissionsJSON, err := json.Marshal(user.Permissions)
 	if err != nil {
 		return fmt.Errorf("marshal permissions: %w", err)
@@ -746,7 +973,8 @@ func (s *WebhookEventStore) UpdateAdminUser(ctx context.Context, id int64, user 
 		UPDATE admin_users
 		SET username = $1, password_hash = $2, is_active = $3, role = $4, permissions = $5, updated_at = NOW()
 		WHERE id = $6
-	`, strings.TrimSpace(user.Username), user.PasswordHash, user.IsActive, strings.TrimSpace(user.Role), permissionsJSON, id)
+		  AND tenant_id = $7
+	`, strings.TrimSpace(user.Username), user.PasswordHash, user.IsActive, strings.TrimSpace(user.Role), permissionsJSON, id, tenantID)
 	if err != nil {
 		return fmt.Errorf("update admin user: %w", err)
 	}
@@ -761,7 +989,8 @@ func (s *WebhookEventStore) UpdateAdminUser(ctx context.Context, id int64, user 
 }
 
 func (s *WebhookEventStore) DeleteAdminUser(ctx context.Context, id int64) error {
-	result, err := s.pool.Exec(ctx, `DELETE FROM admin_users WHERE id = $1`, id)
+	tenantID := tenantIDFromCtx(ctx)
+	result, err := s.pool.Exec(ctx, `DELETE FROM admin_users WHERE id = $1 AND tenant_id = $2`, id, tenantID)
 	if err != nil {
 		return fmt.Errorf("delete admin user: %w", err)
 	}
@@ -776,6 +1005,7 @@ func (s *WebhookEventStore) DeleteAdminUser(ctx context.Context, id int64) error
 }
 
 func (s *WebhookEventStore) GetAdminUserByID(ctx context.Context, id int64) (AdminUser, error) {
+	tenantID := tenantIDFromCtx(ctx)
 	var user AdminUser
 	var lastLoginAt time.Time
 	var permissionsJSON string
@@ -783,7 +1013,8 @@ func (s *WebhookEventStore) GetAdminUserByID(ctx context.Context, id int64) (Adm
 		SELECT id, username, password_hash, is_active, role, permissions, created_at, updated_at, COALESCE(last_login_at, 'epoch'::timestamptz)
 		FROM admin_users
 		WHERE id = $1
-	`, id).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsActive, &user.Role, &permissionsJSON, &user.CreatedAt, &user.UpdatedAt, &lastLoginAt)
+		  AND tenant_id = $2
+	`, id, tenantID).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.IsActive, &user.Role, &permissionsJSON, &user.CreatedAt, &user.UpdatedAt, &lastLoginAt)
 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -805,11 +1036,13 @@ func (s *WebhookEventStore) GetAdminUserByID(ctx context.Context, id int64) (Adm
 }
 
 func (s *WebhookEventStore) UpdateAdminUserActive(ctx context.Context, id int64, isActive bool) error {
+	tenantID := tenantIDFromCtx(ctx)
 	result, err := s.pool.Exec(ctx, `
 		UPDATE admin_users
 		SET is_active = $1, updated_at = NOW()
 		WHERE id = $2
-	`, isActive, id)
+		  AND tenant_id = $3
+	`, isActive, id, tenantID)
 	if err != nil {
 		return fmt.Errorf("update admin user active: %w", err)
 	}
@@ -824,7 +1057,8 @@ func (s *WebhookEventStore) UpdateAdminUserActive(ctx context.Context, id int64,
 }
 
 func (s *WebhookEventStore) UpdateAdminUserLastLogin(ctx context.Context, id int64, at time.Time) error {
-	result, err := s.pool.Exec(ctx, `UPDATE admin_users SET last_login_at = $2, updated_at = NOW() WHERE id = $1`, id, at.UTC())
+	tenantID := tenantIDFromCtx(ctx)
+	result, err := s.pool.Exec(ctx, `UPDATE admin_users SET last_login_at = $2, updated_at = NOW() WHERE id = $1 AND tenant_id = $3`, id, at.UTC(), tenantID)
 	if err != nil {
 		return fmt.Errorf("update admin user last login: %w", err)
 	}
@@ -835,6 +1069,7 @@ func (s *WebhookEventStore) UpdateAdminUserLastLogin(ctx context.Context, id int
 }
 
 func (s *WebhookEventStore) EnsureBootstrapAdminUser(ctx context.Context, username string, passwordHash string) error {
+	tenantID := tenantIDFromCtx(ctx)
 	name := strings.TrimSpace(username)
 	hash := strings.TrimSpace(passwordHash)
 	if name == "" || hash == "" {
@@ -842,7 +1077,7 @@ func (s *WebhookEventStore) EnsureBootstrapAdminUser(ctx context.Context, userna
 	}
 
 	var total int64
-	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM admin_users`).Scan(&total); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM admin_users WHERE tenant_id = $1`, tenantID).Scan(&total); err != nil {
 		return fmt.Errorf("count admin users: %w", err)
 	}
 	if total > 0 {
@@ -850,10 +1085,10 @@ func (s *WebhookEventStore) EnsureBootstrapAdminUser(ctx context.Context, userna
 	}
 
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO admin_users (username, password_hash, is_active, role, permissions)
-		VALUES ($1, $2, TRUE, 'admin', '["read","write","admin"]'::jsonb)
-		ON CONFLICT (username) DO NOTHING
-	`, name, hash)
+		INSERT INTO admin_users (tenant_id, username, password_hash, is_active, role, permissions)
+		VALUES ($1, $2, $3, TRUE, 'admin', '["read","write","admin"]'::jsonb)
+		ON CONFLICT (tenant_id, username) DO NOTHING
+	`, tenantID, name, hash)
 	if err != nil {
 		return fmt.Errorf("bootstrap admin user: %w", err)
 	}
@@ -861,6 +1096,7 @@ func (s *WebhookEventStore) EnsureBootstrapAdminUser(ctx context.Context, userna
 }
 
 func (s *WebhookEventStore) ListAuditLogs(ctx context.Context, limit int, offset int, actor string, action string, since *time.Time) ([]AuditLogRecord, int64, error) {
+	tenantID := tenantIDFromCtx(ctx)
 	ac := strings.TrimSpace(actor)
 	act := strings.TrimSpace(action)
 	hasSince := since != nil
@@ -872,22 +1108,24 @@ func (s *WebhookEventStore) ListAuditLogs(ctx context.Context, limit int, offset
 	var total int64
 	if err := s.pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM audit_logs
-		WHERE ($1 = '' OR actor = $1)
-		  AND ($2 = '' OR action = $2)
-		  AND (NOT $3 OR created_at >= $4)
-	`, ac, act, hasSince, sinceTime).Scan(&total); err != nil {
+		WHERE tenant_id = $1
+		  AND ($2 = '' OR actor = $2)
+		  AND ($3 = '' OR action = $3)
+		  AND (NOT $4 OR created_at >= $5)
+	`, tenantID, ac, act, hasSince, sinceTime).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count audit logs: %w", err)
 	}
 
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, actor, action, target, target_id, payload, created_at
 		FROM audit_logs
-		WHERE ($1 = '' OR actor = $1)
-		  AND ($2 = '' OR action = $2)
-		  AND (NOT $3 OR created_at >= $4)
+		WHERE tenant_id = $1
+		  AND ($2 = '' OR actor = $2)
+		  AND ($3 = '' OR action = $3)
+		  AND (NOT $4 OR created_at >= $5)
 		ORDER BY created_at DESC
-		LIMIT $5 OFFSET $6
-	`, ac, act, hasSince, sinceTime, limit, offset)
+		LIMIT $6 OFFSET $7
+	`, tenantID, ac, act, hasSince, sinceTime, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("query audit logs: %w", err)
 	}
@@ -908,10 +1146,11 @@ func (s *WebhookEventStore) ListAuditLogs(ctx context.Context, limit int, offset
 }
 
 func (s *WebhookEventStore) SaveDeliveryMetric(ctx context.Context, metric DeliveryMetric) error {
+	tenantID := tenantIDFromCtx(ctx)
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO webhook_delivery_metrics (event_type, delivery_id, success, processing_ms, recorded_at)
-		VALUES ($1,$2,$3,$4,$5)
-	`, strings.TrimSpace(metric.EventType), strings.TrimSpace(metric.DeliveryID), metric.Success, metric.ProcessingMS, metric.RecordedAtUTC)
+		INSERT INTO webhook_delivery_metrics (tenant_id, event_type, delivery_id, success, processing_ms, recorded_at)
+		VALUES ($1,$2,$3,$4,$5,$6)
+	`, tenantID, strings.TrimSpace(metric.EventType), strings.TrimSpace(metric.DeliveryID), metric.Success, metric.ProcessingMS, metric.RecordedAtUTC)
 	if err != nil {
 		return fmt.Errorf("insert delivery metric: %w", err)
 	}
@@ -919,27 +1158,45 @@ func (s *WebhookEventStore) SaveDeliveryMetric(ctx context.Context, metric Deliv
 }
 
 func (s *WebhookEventStore) GetMetricsOverview(ctx context.Context, since time.Time) (MetricsOverview, error) {
+	tenantID := tenantIDFromCtx(ctx)
 	var out MetricsOverview
-	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM webhook_events WHERE received_at >= $1`, since).Scan(&out.Events24h); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM webhook_events WHERE tenant_id = $1 AND received_at >= $2`, tenantID, since).Scan(&out.Events24h); err != nil {
 		return out, fmt.Errorf("count events metrics: %w", err)
 	}
-	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM webhook_alerts WHERE created_at >= $1`, since).Scan(&out.Alerts24h); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM webhook_alerts WHERE tenant_id = $1 AND created_at >= $2`, tenantID, since).Scan(&out.Alerts24h); err != nil {
 		return out, fmt.Errorf("count alerts metrics: %w", err)
 	}
-	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM webhook_action_failures WHERE occurred_at >= $1 AND NOT is_resolved`, since).Scan(&out.Failures24h); err != nil {
-		return out, fmt.Errorf("count failures metrics: %w", err)
+	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM webhook_action_failures WHERE tenant_id = $1 AND occurred_at >= $2 AND is_resolved = FALSE`, tenantID, since).Scan(&out.Failures24h); err != nil {
+
 	}
 
 	var total int64
 	var success int64
-	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*), COALESCE(SUM(CASE WHEN success THEN 1 ELSE 0 END),0) FROM webhook_delivery_metrics WHERE recorded_at >= $1`, since).Scan(&total, &success); err != nil {
+	var avgProcessing sql.NullFloat64
+	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*), COALESCE(SUM(CASE WHEN success THEN 1 ELSE 0 END),0), AVG(processing_ms)::float8 FROM webhook_delivery_metrics WHERE tenant_id = $1 AND recorded_at >= $2`, tenantID, since).Scan(&total, &success, &avgProcessing); err != nil {
 		return out, fmt.Errorf("count delivery metrics: %w", err)
 	}
+	out.DeliveryAttempts = total
+	out.DeliverySuccess = success
 	if total > 0 {
 		out.SuccessRate24h = (float64(success) / float64(total)) * 100
+		out.FailureRate24h = 100 - out.SuccessRate24h
+		out.EstimatedManualMinutes24h = float64(total-success) * 2
+		if out.Events24h > 0 {
+			out.AutomationCoverage24h = (float64(total) / float64(out.Events24h)) * 100
+			if out.AutomationCoverage24h > 100 {
+				out.AutomationCoverage24h = 100
+			}
+		}
+	}
+	if avgProcessing.Valid {
+		out.AvgProcessingMS24h = avgProcessing.Float64
+	}
+	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM webhook_action_failures WHERE tenant_id = $1 AND occurred_at >= $2 AND is_resolved`, tenantID, since).Scan(&out.ResolvedFailures24h); err != nil {
+		return out, fmt.Errorf("count resolved failures metrics: %w", err)
 	}
 
-	rows, err := s.pool.Query(ctx, `SELECT processing_ms FROM webhook_delivery_metrics WHERE recorded_at >= $1 ORDER BY processing_ms ASC`, since)
+	rows, err := s.pool.Query(ctx, `SELECT processing_ms FROM webhook_delivery_metrics WHERE tenant_id = $1 AND recorded_at >= $2 ORDER BY processing_ms ASC`, tenantID, since)
 	if err != nil {
 		return out, fmt.Errorf("query latency metrics: %w", err)
 	}
@@ -958,11 +1215,19 @@ func (s *WebhookEventStore) GetMetricsOverview(ctx context.Context, since time.T
 	if len(latencies) > 0 {
 		idx := int(float64(len(latencies)-1) * 0.95)
 		out.P95LatencyMS24h = float64(latencies[idx])
+		if out.AvgProcessingMS24h == 0 {
+			var sum int64
+			for _, v := range latencies {
+				sum += v
+			}
+			out.AvgProcessingMS24h = float64(sum) / float64(len(latencies))
+		}
 	}
 	return out, nil
 }
 
 func (s *WebhookEventStore) GetMetricsTimeSeries(ctx context.Context, since time.Time, intervalMinutes int) ([]MetricsTimePoint, error) {
+	tenantID := tenantIDFromCtx(ctx)
 	if intervalMinutes <= 0 {
 		intervalMinutes = 60
 	}
@@ -977,7 +1242,7 @@ func (s *WebhookEventStore) GetMetricsTimeSeries(ctx context.Context, since time
 	}
 
 	fill := func(query string, assign func(*MetricsTimePoint, int64)) error {
-		rows, err := s.pool.Query(ctx, query, since)
+		rows, err := s.pool.Query(ctx, query, tenantID, since)
 		if err != nil {
 			return err
 		}
@@ -995,13 +1260,13 @@ func (s *WebhookEventStore) GetMetricsTimeSeries(ctx context.Context, since time
 		return rows.Err()
 	}
 
-	if err := fill(`SELECT received_at FROM webhook_events WHERE received_at >= $1`, func(p *MetricsTimePoint, _ int64) { p.Events++ }); err != nil {
+	if err := fill(`SELECT received_at FROM webhook_events WHERE tenant_id = $1 AND received_at >= $2`, func(p *MetricsTimePoint, _ int64) { p.Events++ }); err != nil {
 		return nil, fmt.Errorf("fill events metrics timeseries: %w", err)
 	}
-	if err := fill(`SELECT created_at FROM webhook_alerts WHERE created_at >= $1`, func(p *MetricsTimePoint, _ int64) { p.Alerts++ }); err != nil {
+	if err := fill(`SELECT created_at FROM webhook_alerts WHERE tenant_id = $1 AND created_at >= $2`, func(p *MetricsTimePoint, _ int64) { p.Alerts++ }); err != nil {
 		return nil, fmt.Errorf("fill alerts metrics timeseries: %w", err)
 	}
-	if err := fill(`SELECT occurred_at FROM webhook_action_failures WHERE occurred_at >= $1`, func(p *MetricsTimePoint, _ int64) { p.Failures++ }); err != nil {
+	if err := fill(`SELECT occurred_at FROM webhook_action_failures WHERE tenant_id = $1 AND occurred_at >= $2 AND is_resolved = FALSE`, func(p *MetricsTimePoint, _ int64) { p.Failures++ }); err != nil {
 		return nil, fmt.Errorf("fill failures metrics timeseries: %w", err)
 	}
 
@@ -1014,11 +1279,86 @@ func (s *WebhookEventStore) GetMetricsTimeSeries(ctx context.Context, since time
 	return out, nil
 }
 
+func (s *WebhookEventStore) ListTenants(ctx context.Context) ([]TenantRecord, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, name, is_active, created_at, updated_at
+		FROM tenants
+		ORDER BY id ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query tenants: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]TenantRecord, 0, 16)
+	for rows.Next() {
+		var item TenantRecord
+		if err := rows.Scan(&item.ID, &item.Name, &item.IsActive, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan tenant: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate tenants: %w", err)
+	}
+	return items, nil
+}
+
+func (s *WebhookEventStore) CreateTenant(ctx context.Context, id string, name string) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO tenants (id, name, is_active)
+		VALUES ($1, $2, TRUE)
+	`, strings.TrimSpace(id), strings.TrimSpace(name))
+	if err != nil {
+		return fmt.Errorf("create tenant: %w", err)
+	}
+	return nil
+}
+
+func (s *WebhookEventStore) UpdateTenantActive(ctx context.Context, id string, isActive bool) error {
+	result, err := s.pool.Exec(ctx, `
+		UPDATE tenants
+		SET is_active = $2,
+		    updated_at = NOW()
+		WHERE id = $1
+	`, strings.TrimSpace(id), isActive)
+	if err != nil {
+		return fmt.Errorf("update tenant active: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("tenant not found")
+	}
+	return nil
+}
+
 func (s *WebhookEventStore) ensureSchema(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS tenants (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			is_active BOOLEAN NOT NULL DEFAULT TRUE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("create tenants table: %w", err)
+	}
+
+	_, err = s.pool.Exec(ctx, `
+		INSERT INTO tenants (id, name, is_active)
+		VALUES ('default', 'Default Tenant', TRUE)
+		ON CONFLICT (id) DO NOTHING
+	`)
+	if err != nil {
+		return fmt.Errorf("seed default tenant: %w", err)
+	}
+
+	_, err = s.pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS webhook_events (
 			id BIGSERIAL PRIMARY KEY,
-			delivery_id TEXT NOT NULL UNIQUE,
+			tenant_id TEXT NOT NULL DEFAULT 'default',
+			delivery_id TEXT NOT NULL,
 			event_type TEXT NOT NULL,
 			action TEXT NOT NULL,
 			repository_full_name TEXT NOT NULL,
@@ -1032,40 +1372,9 @@ func (s *WebhookEventStore) ensureSchema(ctx context.Context) error {
 	}
 
 	_, err = s.pool.Exec(ctx, `
-		CREATE INDEX IF NOT EXISTS idx_webhook_events_received_at
-		ON webhook_events (received_at DESC)
-	`)
-	if err != nil {
-		return fmt.Errorf("create idx_webhook_events_received_at: %w", err)
-	}
-
-	_, err = s.pool.Exec(ctx, `
-		CREATE INDEX IF NOT EXISTS idx_webhook_events_event_type
-		ON webhook_events (event_type)
-	`)
-	if err != nil {
-		return fmt.Errorf("create idx_webhook_events_event_type: %w", err)
-	}
-
-	_, err = s.pool.Exec(ctx, `
-		CREATE INDEX IF NOT EXISTS idx_webhook_events_action
-		ON webhook_events (action)
-	`)
-	if err != nil {
-		return fmt.Errorf("create idx_webhook_events_action: %w", err)
-	}
-
-	_, err = s.pool.Exec(ctx, `
-		CREATE INDEX IF NOT EXISTS idx_webhook_events_event_action
-		ON webhook_events (event_type, action)
-	`)
-	if err != nil {
-		return fmt.Errorf("create idx_webhook_events_event_action: %w", err)
-	}
-
-	_, err = s.pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS webhook_alerts (
 			id BIGSERIAL PRIMARY KEY,
+			tenant_id TEXT NOT NULL DEFAULT 'default',
 			delivery_id TEXT NOT NULL,
 			event_type TEXT NOT NULL,
 			action TEXT NOT NULL,
@@ -1076,7 +1385,7 @@ func (s *WebhookEventStore) ensureSchema(ctx context.Context) error {
 			suggestion_value TEXT NOT NULL,
 			reason TEXT NOT NULL,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			UNIQUE (delivery_id, suggestion_type, suggestion_value, rule_matched)
+			UNIQUE (tenant_id, delivery_id, suggestion_type, suggestion_value, rule_matched)
 		)
 	`)
 	if err != nil {
@@ -1084,32 +1393,9 @@ func (s *WebhookEventStore) ensureSchema(ctx context.Context) error {
 	}
 
 	_, err = s.pool.Exec(ctx, `
-		CREATE INDEX IF NOT EXISTS idx_webhook_alerts_created_at
-		ON webhook_alerts (created_at DESC)
-	`)
-	if err != nil {
-		return fmt.Errorf("create idx_webhook_alerts_created_at: %w", err)
-	}
-
-	_, err = s.pool.Exec(ctx, `
-		CREATE INDEX IF NOT EXISTS idx_webhook_alerts_event_action
-		ON webhook_alerts (event_type, action)
-	`)
-	if err != nil {
-		return fmt.Errorf("create idx_webhook_alerts_event_action: %w", err)
-	}
-
-	_, err = s.pool.Exec(ctx, `
-		CREATE INDEX IF NOT EXISTS idx_webhook_alerts_suggestion_type
-		ON webhook_alerts (suggestion_type)
-	`)
-	if err != nil {
-		return fmt.Errorf("create idx_webhook_alerts_suggestion_type: %w", err)
-	}
-
-	_, err = s.pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS webhook_rules (
 			id BIGSERIAL PRIMARY KEY,
+			tenant_id TEXT NOT NULL DEFAULT 'default',
 			event_type TEXT NOT NULL,
 			keyword TEXT NOT NULL,
 			suggestion_type TEXT NOT NULL,
@@ -1117,7 +1403,7 @@ func (s *WebhookEventStore) ensureSchema(ctx context.Context) error {
 			reason TEXT NOT NULL,
 			is_active BOOLEAN NOT NULL DEFAULT true,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			UNIQUE (event_type, keyword, suggestion_type, suggestion_value)
+			UNIQUE (tenant_id, event_type, keyword, suggestion_type, suggestion_value)
 		)
 	`)
 	if err != nil {
@@ -1125,24 +1411,26 @@ func (s *WebhookEventStore) ensureSchema(ctx context.Context) error {
 	}
 
 	_, err = s.pool.Exec(ctx, `
-		CREATE INDEX IF NOT EXISTS idx_webhook_rules_event_type
-		ON webhook_rules (event_type)
+		CREATE TABLE IF NOT EXISTS webhook_rule_versions (
+			id BIGSERIAL PRIMARY KEY,
+			tenant_id TEXT NOT NULL DEFAULT 'default',
+			version BIGINT NOT NULL,
+			rules_json JSONB NOT NULL,
+			rule_count INT NOT NULL,
+			created_by TEXT NOT NULL,
+			source_version BIGINT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			UNIQUE (tenant_id, version)
+		)
 	`)
 	if err != nil {
-		return fmt.Errorf("create idx_webhook_rules_event_type: %w", err)
-	}
-
-	_, err = s.pool.Exec(ctx, `
-		CREATE INDEX IF NOT EXISTS idx_webhook_rules_active
-		ON webhook_rules (is_active)
-	`)
-	if err != nil {
-		return fmt.Errorf("create idx_webhook_rules_active: %w", err)
+		return fmt.Errorf("create webhook_rule_versions table: %w", err)
 	}
 
 	_, err = s.pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS webhook_action_failures (
 			id BIGSERIAL PRIMARY KEY,
+			tenant_id TEXT NOT NULL DEFAULT 'default',
 			delivery_id TEXT NOT NULL,
 			event_type TEXT NOT NULL,
 			action TEXT NOT NULL,
@@ -1164,30 +1452,9 @@ func (s *WebhookEventStore) ensureSchema(ctx context.Context) error {
 	}
 
 	_, err = s.pool.Exec(ctx, `
-		CREATE INDEX IF NOT EXISTS idx_webhook_action_failures_delivery
-		ON webhook_action_failures (delivery_id)
-	`)
-	if err != nil {
-		return fmt.Errorf("create idx_webhook_action_failures_delivery: %w", err)
-	}
-
-	_, err = s.pool.Exec(ctx, `
-		CREATE INDEX IF NOT EXISTS idx_webhook_action_failures_occurred_at
-		ON webhook_action_failures (occurred_at DESC)
-	`)
-	if err != nil {
-		return fmt.Errorf("create idx_webhook_action_failures_occurred_at: %w", err)
-	}
-
-	_, _ = s.pool.Exec(ctx, `ALTER TABLE webhook_action_failures ADD COLUMN IF NOT EXISTS retry_count INT NOT NULL DEFAULT 0`)
-	_, _ = s.pool.Exec(ctx, `ALTER TABLE webhook_action_failures ADD COLUMN IF NOT EXISTS last_retry_status TEXT NOT NULL DEFAULT 'never'`)
-	_, _ = s.pool.Exec(ctx, `ALTER TABLE webhook_action_failures ADD COLUMN IF NOT EXISTS last_retry_message TEXT NOT NULL DEFAULT ''`)
-	_, _ = s.pool.Exec(ctx, `ALTER TABLE webhook_action_failures ADD COLUMN IF NOT EXISTS last_retry_at TIMESTAMPTZ NULL`)
-	_, _ = s.pool.Exec(ctx, `ALTER TABLE webhook_action_failures ADD COLUMN IF NOT EXISTS is_resolved BOOLEAN NOT NULL DEFAULT FALSE`)
-
-	_, err = s.pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS audit_logs (
 			id BIGSERIAL PRIMARY KEY,
+			tenant_id TEXT NOT NULL DEFAULT 'default',
 			actor TEXT NOT NULL,
 			action TEXT NOT NULL,
 			target TEXT NOT NULL,
@@ -1201,24 +1468,18 @@ func (s *WebhookEventStore) ensureSchema(ctx context.Context) error {
 	}
 
 	_, err = s.pool.Exec(ctx, `
-		CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at
-		ON audit_logs (created_at DESC)
-	`)
-	if err != nil {
-		return fmt.Errorf("create idx_audit_logs_created_at: %w", err)
-	}
-
-	_, err = s.pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS admin_users (
 			id BIGSERIAL PRIMARY KEY,
-			username TEXT NOT NULL UNIQUE,
+			tenant_id TEXT NOT NULL DEFAULT 'default',
+			username TEXT NOT NULL,
 			password_hash TEXT NOT NULL,
 			is_active BOOLEAN NOT NULL DEFAULT TRUE,
 			role TEXT NOT NULL DEFAULT 'viewer',
 			permissions JSONB NOT NULL DEFAULT '["read"]'::jsonb,
 			last_login_at TIMESTAMPTZ NULL,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			UNIQUE (tenant_id, username)
 		)
 	`)
 	if err != nil {
@@ -1226,24 +1487,9 @@ func (s *WebhookEventStore) ensureSchema(ctx context.Context) error {
 	}
 
 	_, err = s.pool.Exec(ctx, `
-		CREATE INDEX IF NOT EXISTS idx_admin_users_is_active
-		ON admin_users (is_active)
-	`)
-	if err != nil {
-		return fmt.Errorf("create idx_admin_users_is_active: %w", err)
-	}
-
-	_, err = s.pool.Exec(ctx, `
-		CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_action
-		ON audit_logs (actor, action)
-	`)
-	if err != nil {
-		return fmt.Errorf("create idx_audit_logs_actor_action: %w", err)
-	}
-
-	_, err = s.pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS webhook_delivery_metrics (
 			id BIGSERIAL PRIMARY KEY,
+			tenant_id TEXT NOT NULL DEFAULT 'default',
 			event_type TEXT NOT NULL,
 			delivery_id TEXT NOT NULL,
 			success BOOLEAN NOT NULL,
@@ -1255,6 +1501,205 @@ func (s *WebhookEventStore) ensureSchema(ctx context.Context) error {
 		return fmt.Errorf("create webhook_delivery_metrics table: %w", err)
 	}
 
+	// 兼容历史表结构
+	_, _ = s.pool.Exec(ctx, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'viewer'`)
+	_, _ = s.pool.Exec(ctx, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS permissions JSONB NOT NULL DEFAULT '["read"]'::jsonb`)
+	_, _ = s.pool.Exec(ctx, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ NULL`)
+	_, _ = s.pool.Exec(ctx, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`)
+	_, _ = s.pool.Exec(ctx, `ALTER TABLE webhook_action_failures ADD COLUMN IF NOT EXISTS retry_count INT NOT NULL DEFAULT 0`)
+	_, _ = s.pool.Exec(ctx, `ALTER TABLE webhook_action_failures ADD COLUMN IF NOT EXISTS last_retry_status TEXT NOT NULL DEFAULT 'never'`)
+	_, _ = s.pool.Exec(ctx, `ALTER TABLE webhook_action_failures ADD COLUMN IF NOT EXISTS last_retry_message TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.pool.Exec(ctx, `ALTER TABLE webhook_action_failures ADD COLUMN IF NOT EXISTS last_retry_at TIMESTAMPTZ NULL`)
+	_, _ = s.pool.Exec(ctx, `ALTER TABLE webhook_action_failures ADD COLUMN IF NOT EXISTS is_resolved BOOLEAN NOT NULL DEFAULT FALSE`)
+
+	_, _ = s.pool.Exec(ctx, `ALTER TABLE webhook_events ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'`)
+	_, _ = s.pool.Exec(ctx, `ALTER TABLE webhook_alerts ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'`)
+	_, _ = s.pool.Exec(ctx, `ALTER TABLE webhook_rules ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'`)
+	_, _ = s.pool.Exec(ctx, `ALTER TABLE webhook_rule_versions ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'`)
+	_, _ = s.pool.Exec(ctx, `ALTER TABLE webhook_action_failures ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'`)
+	_, _ = s.pool.Exec(ctx, `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'`)
+	_, _ = s.pool.Exec(ctx, `ALTER TABLE webhook_delivery_metrics ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'`)
+	_, _ = s.pool.Exec(ctx, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'`)
+
+	_, _ = s.pool.Exec(ctx, `UPDATE webhook_events SET tenant_id = 'default' WHERE tenant_id IS NULL OR tenant_id = ''`)
+	_, _ = s.pool.Exec(ctx, `UPDATE webhook_alerts SET tenant_id = 'default' WHERE tenant_id IS NULL OR tenant_id = ''`)
+	_, _ = s.pool.Exec(ctx, `UPDATE webhook_rules SET tenant_id = 'default' WHERE tenant_id IS NULL OR tenant_id = ''`)
+	_, _ = s.pool.Exec(ctx, `UPDATE webhook_rule_versions SET tenant_id = 'default' WHERE tenant_id IS NULL OR tenant_id = ''`)
+	_, _ = s.pool.Exec(ctx, `UPDATE webhook_action_failures SET tenant_id = 'default' WHERE tenant_id IS NULL OR tenant_id = ''`)
+	_, _ = s.pool.Exec(ctx, `UPDATE audit_logs SET tenant_id = 'default' WHERE tenant_id IS NULL OR tenant_id = ''`)
+	_, _ = s.pool.Exec(ctx, `UPDATE webhook_delivery_metrics SET tenant_id = 'default' WHERE tenant_id IS NULL OR tenant_id = ''`)
+	_, _ = s.pool.Exec(ctx, `UPDATE admin_users SET tenant_id = 'default' WHERE tenant_id IS NULL OR tenant_id = ''`)
+
+	_, _ = s.pool.Exec(ctx, `DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'webhook_events_delivery_id_key') THEN ALTER TABLE webhook_events DROP CONSTRAINT webhook_events_delivery_id_key; END IF; END $$;`)
+	_, _ = s.pool.Exec(ctx, `DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'admin_users_username_key') THEN ALTER TABLE admin_users DROP CONSTRAINT admin_users_username_key; END IF; END $$;`)
+
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_webhook_events_received_at
+		ON webhook_events (received_at DESC)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_webhook_events_received_at: %w", err)
+	}
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_webhook_events_event_type
+		ON webhook_events (event_type)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_webhook_events_event_type: %w", err)
+	}
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_webhook_events_action
+		ON webhook_events (action)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_webhook_events_action: %w", err)
+	}
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_webhook_events_event_action
+		ON webhook_events (event_type, action)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_webhook_events_event_action: %w", err)
+	}
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_webhook_events_tenant_id
+		ON webhook_events (tenant_id)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_webhook_events_tenant_id: %w", err)
+	}
+	_, err = s.pool.Exec(ctx, `
+		CREATE UNIQUE INDEX IF NOT EXISTS uk_webhook_events_tenant_delivery_id
+		ON webhook_events (tenant_id, delivery_id)
+	`)
+	if err != nil {
+		return fmt.Errorf("create uk_webhook_events_tenant_delivery_id: %w", err)
+	}
+
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_webhook_alerts_created_at
+		ON webhook_alerts (created_at DESC)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_webhook_alerts_created_at: %w", err)
+	}
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_webhook_alerts_event_action
+		ON webhook_alerts (event_type, action)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_webhook_alerts_event_action: %w", err)
+	}
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_webhook_alerts_suggestion_type
+		ON webhook_alerts (suggestion_type)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_webhook_alerts_suggestion_type: %w", err)
+	}
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_webhook_alerts_tenant_id
+		ON webhook_alerts (tenant_id)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_webhook_alerts_tenant_id: %w", err)
+	}
+
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_webhook_rules_event_type
+		ON webhook_rules (event_type)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_webhook_rules_event_type: %w", err)
+	}
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_webhook_rules_active
+		ON webhook_rules (is_active)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_webhook_rules_active: %w", err)
+	}
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_webhook_rules_tenant_id
+		ON webhook_rules (tenant_id)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_webhook_rules_tenant_id: %w", err)
+	}
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_webhook_rule_versions_tenant_version
+		ON webhook_rule_versions (tenant_id, version DESC)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_webhook_rule_versions_tenant_version: %w", err)
+	}
+
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_webhook_action_failures_delivery
+		ON webhook_action_failures (delivery_id)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_webhook_action_failures_delivery: %w", err)
+	}
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_webhook_action_failures_occurred_at
+		ON webhook_action_failures (occurred_at DESC)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_webhook_action_failures_occurred_at: %w", err)
+	}
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_webhook_action_failures_tenant_id
+		ON webhook_action_failures (tenant_id)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_webhook_action_failures_tenant_id: %w", err)
+	}
+
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at
+		ON audit_logs (created_at DESC)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_audit_logs_created_at: %w", err)
+	}
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_action
+		ON audit_logs (actor, action)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_audit_logs_actor_action: %w", err)
+	}
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_id
+		ON audit_logs (tenant_id)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_audit_logs_tenant_id: %w", err)
+	}
+
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_admin_users_is_active
+		ON admin_users (is_active)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_admin_users_is_active: %w", err)
+	}
+	_, err = s.pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_admin_users_username
+		ON admin_users (tenant_id, username)
+	`)
+	if err != nil {
+		return fmt.Errorf("create idx_admin_users_username: %w", err)
+	}
+	_, err = s.pool.Exec(ctx, `
+		CREATE UNIQUE INDEX IF NOT EXISTS uk_admin_users_tenant_username
+		ON admin_users (tenant_id, username)
+	`)
+	if err != nil {
+		return fmt.Errorf("create uk_admin_users_tenant_username: %w", err)
+	}
+
 	_, err = s.pool.Exec(ctx, `
 		CREATE INDEX IF NOT EXISTS idx_webhook_delivery_metrics_recorded_at
 		ON webhook_delivery_metrics (recorded_at DESC)
@@ -1262,19 +1707,13 @@ func (s *WebhookEventStore) ensureSchema(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("create idx_webhook_delivery_metrics_recorded_at: %w", err)
 	}
-
 	_, err = s.pool.Exec(ctx, `
-		CREATE INDEX IF NOT EXISTS idx_admin_users_username
-		ON admin_users (username)
+		CREATE INDEX IF NOT EXISTS idx_webhook_delivery_metrics_tenant_id
+		ON webhook_delivery_metrics (tenant_id)
 	`)
 	if err != nil {
-		return fmt.Errorf("create idx_admin_users_username: %w", err)
+		return fmt.Errorf("create idx_webhook_delivery_metrics_tenant_id: %w", err)
 	}
-
-	_, _ = s.pool.Exec(ctx, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'viewer'`)
-	_, _ = s.pool.Exec(ctx, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS permissions JSONB NOT NULL DEFAULT '["read"]'::jsonb`)
-	_, _ = s.pool.Exec(ctx, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ NULL`)
-	_, _ = s.pool.Exec(ctx, `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`)
 
 	return nil
 }

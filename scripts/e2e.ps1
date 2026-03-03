@@ -1,6 +1,7 @@
 param(
   [string]$AdminUsername = "admin",
   [string]$AdminPassword = "CHANGE_ME_ADMIN_PASSWORD",
+  [string]$TenantID = "default",
   [string]$JWTSecret = "CHANGE_ME_JWT_SECRET",
   [string]$GitHubWebhookSecret = "CHANGE_ME_WEBHOOK_SECRET",
   [string]$GitHubToken = "",
@@ -100,7 +101,7 @@ if ($StartWeb) {
   }
 
 Write-Host "[E2E 4/8] Login... (username=$AdminUsername)" -ForegroundColor Cyan
-  $loginBody = @{ username = $AdminUsername; password = $AdminPassword } | ConvertTo-Json
+  $loginBody = @{ username = $AdminUsername; password = $AdminPassword; tenant_id = $TenantID } | ConvertTo-Json
   $login = Invoke-RestMethod -Method Post -Uri "http://localhost:$ApiPort/auth/login" -ContentType "application/json" -Body $loginBody
 
   Assert-True ($login.ok -eq $true) "login should return ok=true"
@@ -116,7 +117,7 @@ Write-Host "[E2E 4/8] Login... (username=$AdminUsername)" -ForegroundColor Cyan
     reason = "e2e urgent rule"
     is_active = $true
   } | ConvertTo-Json
-  $ruleResp = Invoke-RestMethod -Method Post -Uri "http://localhost:$ApiPort/rules" -Headers $authHeaders -ContentType "application/json" -Body $ruleBody
+  $ruleResp = Invoke-RestMethod -Method Post -Uri "http://localhost:$ApiPort/api/rules" -Headers $authHeaders -ContentType "application/json" -Body $ruleBody
 
 
   Write-Host "[E2E 6/8] Send webhook..." -ForegroundColor Cyan
@@ -143,8 +144,8 @@ Write-Host "[E2E 4/8] Login... (username=$AdminUsername)" -ForegroundColor Cyan
   Assert-True ($webhook.ok -eq $true) "webhook response should be ok=true"
 
   Write-Host "[E2E 7/8] Verify events/alerts..." -ForegroundColor Cyan
-  $events = Invoke-RestMethod -Method Get -Uri "http://localhost:$ApiPort/events?limit=20&offset=0&event_type=issues&action=opened" -Headers $authHeaders
-  $alerts = Invoke-RestMethod -Method Get -Uri "http://localhost:$ApiPort/alerts?limit=20&offset=0&event_type=issues&action=opened&suggestion_type=label" -Headers $authHeaders
+  $events = Invoke-RestMethod -Method Get -Uri "http://localhost:$ApiPort/api/events?limit=20&offset=0&event_type=issues&action=opened" -Headers $authHeaders
+  $alerts = Invoke-RestMethod -Method Get -Uri "http://localhost:$ApiPort/api/alerts?limit=20&offset=0&event_type=issues&action=opened&suggestion_type=label" -Headers $authHeaders
 
   Assert-True ($events.ok -eq $true) "events API should return ok=true"
   Assert-True ($alerts.ok -eq $true) "alerts API should return ok=true"

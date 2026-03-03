@@ -73,9 +73,13 @@ export const api = {
     return resp.json()
   },
 
-  async delete(url: string) {
+  async delete(url: string, init?: RequestInit) {
     const resp = await apiFetch(url, {
+      ...init,
       method: 'DELETE',
+      headers: {
+        ...(init?.headers ?? {}),
+      },
     })
     if (!resp.ok) {
       throw new Error(`HTTP ${resp.status}: ${resp.statusText}`)

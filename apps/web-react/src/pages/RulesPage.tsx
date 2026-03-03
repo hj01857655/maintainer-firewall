@@ -33,6 +33,21 @@ type RuleFilterOptionsResponse = {
   message?: string
 }
 
+type RuleVersionItem = {
+  version: number
+  rule_count: number
+  created_by: string
+  source_version?: number
+  created_at: string
+}
+
+type RuleVersionsResponse = {
+  ok: boolean
+  items: RuleVersionItem[]
+  total: number
+  message?: string
+}
+
 export function RulesPage() {
   const { t } = useTranslation()
   const [searchParams] = useSearchParams()
@@ -46,6 +61,9 @@ export function RulesPage() {
   const [filterOptions, setFilterOptions] = useState<RuleFilterOptions>({ event_types: [], suggestion_types: [], active_states: [] })
   const [creating, setCreating] = useState(false)
   const [togglingId, setTogglingId] = useState<number | null>(null)
+  const [versions, setVersions] = useState<RuleVersionItem[]>([])
+  const [publishing, setPublishing] = useState(false)
+  const [rollingVersion, setRollingVersion] = useState<number | null>(null)
 
   const [formEventType, setFormEventType] = useState<'issues' | 'pull_request'>('issues')
   const [formKeyword, setFormKeyword] = useState('')
@@ -82,6 +100,22 @@ export function RulesPage() {
       .catch((e: Error) => setError(e.message))
   }
 
+  function reloadVersions() {
+    fetch('/api/rules/versions?limit=20&offset=0', { headers: authHeaders() })
+      .then(async (r) => {
+        if (!r.ok) {
+          const body = await r.text()
+          throw new Error(`rule versions HTTP ${r.status} ${body}`.trim())
+        }
+        return r.json() as Promise<RuleVersionsResponse>
+      })
+      .then((data) => {
+        if (!data.ok) throw new Error(data.message || 'rule versions response not ok')
+        setVersions(data.items || [])
+      })
+      .catch((e: Error) => setError(e.message))
+  }
+
   useEffect(() => {
     fetch('/api/rules/filter-options', { headers: authHeaders() })
       .then(async (r) => {
@@ -98,6 +132,10 @@ export function RulesPage() {
       .catch(() => {
         // 不阻塞主列表加载，失败时回退到当前页去重选项
       })
+  }, [])
+
+  useEffect(() => {
+    reloadVersions()
   }, [])
 
   useEffect(() => {
@@ -176,6 +214,56 @@ export function RulesPage() {
       setError(msg)
     } finally {
       setTogglingId(null)
+    }
+  }
+
+  async function onPublishVersion() {
+    setPublishing(true)
+    setError('')
+    try {
+      const resp = await fetch('/api/rules/publish', {
+        method: 'POST',
+        headers: { ...authHeaders() },
+      })
+      if (!resp.ok) {
+        const body = await resp.text()
+        throw new Error(`publish rule version HTTP ${resp.status} ${body}`.trim())
+      }
+      const data: { ok: boolean; message?: string } = await resp.json()
+      if (!data.ok) throw new Error(data.message || 'publish rule version failed')
+      reloadVersions()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'publish rule version failed'
+      setError(msg)
+    } finally {
+      setPublishing(false)
+    }
+  }
+
+  async function onRollbackVersion(version: number) {
+    if (!window.confirm(t('rules.versions.rollbackConfirm', { version }))) return
+    setRollingVersion(version)
+    setError('')
+    try {
+      const resp = await fetch('/api/rules/rollback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-MF-Confirm': 'confirm', ...authHeaders() },
+        body: JSON.stringify({ version }),
+      })
+      if (!resp.ok) {
+        const body = await resp.text()
+        throw new Error(`rollback rule version HTTP ${resp.status} ${body}`.trim())
+      }
+      const data: { ok: boolean; message?: string } = await resp.json()
+      if (!data.ok) throw new Error(data.message || 'rollback rule version failed')
+      setOffset(0)
+      reloadRules(0)
+      reloadVersions()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'rollback rule version failed'
+      setError(msg)
+    } finally {
+      setRollingVersion(null)
     }
   }
 
@@ -331,6 +419,59 @@ export function RulesPage() {
               {t('common.applyFilters')}
             </button>
           </div>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:p-6 dark:border-slate-700 dark:bg-slate-900/80 dark:shadow-xl">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="m-0 text-lg font-semibold text-slate-900 dark:text-slate-100">{t('rules.versions.title')}</h2>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{t('rules.versions.subtitle')}</p>
+          </div>
+          <button
+            type="button"
+            disabled={publishing}
+            onClick={() => void onPublishVersion()}
+            className="h-10 min-w-[116px] cursor-pointer rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white transition-colors duration-200 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {publishing ? t('rules.versions.publishing') : t('rules.versions.publish')}
+          </button>
+        </div>
+
+        <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
+          <table className="min-w-[720px] w-full text-sm">
+            <thead className="bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+              <tr>
+                <th className="px-3 py-2 text-left">{t('rules.versions.table.version')}</th>
+                <th className="px-3 py-2 text-left">{t('rules.versions.table.ruleCount')}</th>
+                <th className="px-3 py-2 text-left">{t('rules.versions.table.createdBy')}</th>
+                <th className="px-3 py-2 text-left">{t('rules.versions.table.sourceVersion')}</th>
+                <th className="px-3 py-2 text-left">{t('rules.versions.table.createdAt')}</th>
+                <th className="px-3 py-2 text-left">{t('rules.versions.table.action')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {versions.map((item) => (
+                <tr key={item.version} className="border-t border-slate-200 dark:border-slate-700">
+                  <td className="px-3 py-2 text-slate-900 dark:text-slate-100">v{item.version}</td>
+                  <td className="px-3 py-2 text-slate-900 dark:text-slate-100">{item.rule_count}</td>
+                  <td className="px-3 py-2 text-slate-900 dark:text-slate-100">{item.created_by || t('rules.versions.na')}</td>
+                  <td className="px-3 py-2 text-slate-900 dark:text-slate-100">{item.source_version ? `v${item.source_version}` : t('rules.versions.na')}</td>
+                  <td className="px-3 py-2 text-slate-900 dark:text-slate-100">{new Date(item.created_at).toLocaleString()}</td>
+                  <td className="px-3 py-2">
+                    <button
+                      type="button"
+                      disabled={rollingVersion === item.version}
+                      onClick={() => void onRollbackVersion(item.version)}
+                      className="h-9 cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition-colors duration-200 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                    >
+                      {rollingVersion === item.version ? t('rules.versions.rollingBack') : t('rules.versions.rollback')}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
 

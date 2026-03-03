@@ -127,9 +127,36 @@ Build a self-hostable service that helps maintainers reduce noisy triage work an
 - Must use configured `GITHUB_TOKEN` and reject when token/provider is unavailable.
 - Delivery id for synced GitHub events should be normalized as `gh-<github_event_id>` for idempotent upsert.
 
+### FR-11 Multi-Tenant + RBAC Governance (Protected)
+- Login request supports optional `tenant_id`, defaulting to `default`.
+- JWT claims must include:
+  - `tenant_id`
+  - `role`
+  - `permissions`
+- Middleware must inject `tenant_id` into request context and enforce permission-based access control.
+- Permission layers:
+  - `read`: list/query and simulation APIs
+  - `write`: create/update APIs
+  - `admin`: tenant governance APIs
+- Dangerous admin operations must require explicit confirmation header:
+  - `X-MF-Confirm: confirm`
+
+### FR-12 Rule Version Lifecycle
+- Provide protected rule-version APIs:
+  - `POST /api/rules/publish`
+  - `GET /api/rules/versions`
+  - `POST /api/rules/rollback`
+  - `POST /api/rules/replay`
+- Publish creates immutable rule snapshots with version numbers.
+- Rollback restores rules from historical version and records a new snapshot.
+- Replay supports:
+  - replay by specified historical `version`
+  - replay against current active rules when `version=0` or omitted
+
 ## 7. Non-Functional Requirements
 
 - **Security**: Reject unsigned/invalid webhooks; protected APIs require bearer JWT.
+- **Security**: Enforce tenant boundary and least-privilege RBAC; dangerous admin APIs require explicit confirmation header.
 - **Reliability**: Service should keep accepting events under normal failures with retry-ready design.
 - **Performance**: P95 webhook processing < 500ms (excluding DB outage).
 - **Observability**: Structured logs for webhook/auth/action/github-sync paths and metrics/audit querying APIs.
@@ -164,6 +191,10 @@ For current main-flow completion, all are required:
 23. `go test ./...` and `go build ./...` pass.
 24. `npm run build` passes.
 25. README/docs include setup and run instructions.
+26. Protected APIs are grouped under `/api/*` and permission-gated by `read`/`write`/`admin`.
+27. Login/JWT/middleware carry consistent `tenant_id` and enforce tenant-isolated queries.
+28. Rule version lifecycle APIs (publish/list/rollback/replay) are available and tested.
+29. Dangerous APIs reject requests without `X-MF-Confirm: confirm`.
 
 ## 9. Milestones
 
@@ -179,6 +210,8 @@ For current main-flow completion, all are required:
 - **M10**: action retry + failure recording without blocking webhook core path (done)
 - **M11**: `/events` GitHub source mode + on-demand/periodic sync-to-DB (`source=github`, `mode=types|items`, `sync=true`, `/events/sync-status`, scheduler) (done)
 - **M12**: Full-dataset filter-options APIs for events/alerts/rules + frontend stable dropdown integration (done)
+- **M13**: Multi-tenant boundary + RBAC permission governance + danger confirmation gate (done)
+- **M14**: Rule version lifecycle (publish/list/rollback/replay) with frontend version panel (done)
 
 ## 10. Risks and Mitigations
 
